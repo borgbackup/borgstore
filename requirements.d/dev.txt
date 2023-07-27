@@ -1,0 +1,5 @@
+black >=23.0, <24
+tox
+pytest
+build
+twine
