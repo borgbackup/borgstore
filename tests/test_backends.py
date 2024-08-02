@@ -26,6 +26,10 @@ def posixfs_backend(tmp_path):
 def get_sftp_backend():
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
     return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
+    # for tests with higher latency:
+    # return Sftp(
+    #    username="twaldmann", hostname="shell.ipv4.thinkmo.de", port=2222, path="/home/twaldmann/borgstore/temp-store"
+    # )
 
 
 def check_sftp_available():

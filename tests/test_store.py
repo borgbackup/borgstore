@@ -7,7 +7,7 @@ While this works for these tests, this is not recommended for production!
 import pytest
 
 from . import key, list_store_names
-from .test_backends import posixfs_backend  # noqa
+from .test_backends import posixfs_backend, sftp_backend, sftp_is_available  # noqa
 
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo
@@ -60,6 +60,20 @@ def test_scalability_count(posixfs_backend, levels, count):
     keys = [key(i) for i in range(count)]
     for k in keys:
         store.store(k, b"")
+    assert list_store_names(store, ROOTNS) == keys
+
+
+@pytest.mark.skipif(not sftp_is_available, reason="SFTP is not available")
+def test_scalability_big_values(sftp_backend):
+    levels = {ROOTNS: [0]}
+    count = 10
+    value = b"x" * 2**20
+    store = Store(backend=sftp_backend, levels=levels)
+    keys = [key(i) for i in range(count)]
+    for k in keys:
+        store.store(k, value)
+    for k in keys:
+        assert store.load(k) == value
     assert list_store_names(store, ROOTNS) == keys
 
 
