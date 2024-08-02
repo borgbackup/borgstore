@@ -125,7 +125,7 @@ class PosixFS(BackendBase):
                 try:
                     st = p.stat()
                 except FileNotFoundError:
-                    raise KeyError(p.name) from None
+                    pass
                 else:
                     is_dir = stat.S_ISDIR(st.st_mode)
                     size = 0 if is_dir else st.st_size
