@@ -131,6 +131,7 @@ class Sftp(BackendBase):
         validate_name(name)
         try:
             with self.client.open(name) as f:
+                f.prefetch()  # speeds up the following read() significantly!
                 return f.read()
         except FileNotFoundError:
             raise KeyError(name) from None
@@ -143,6 +144,7 @@ class Sftp(BackendBase):
         # so the store never sees partially written data.
         tmp_name = str(tmp_dir / (TEMP_PREFIX + "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8))))
         with self.client.open(tmp_name, mode="w") as f:
+            f.set_pipelined(True)  # speeds up the following write() significantly!
             f.write(value)
         # rename it to the final name:
         try:
