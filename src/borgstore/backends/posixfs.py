@@ -127,8 +127,9 @@ class PosixFS(BackendBase):
                 except FileNotFoundError:
                     pass
                 else:
-                    is_dir = stat.S_ISDIR(st.st_mode)
-                    size = 0 if is_dir else st.st_size
-                    yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
+                    if not p.name.endswith(TMP_SUFFIX):
+                        is_dir = stat.S_ISDIR(st.st_mode)
+                        size = 0 if is_dir else st.st_size
+                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
         except FileNotFoundError:
             raise KeyError(name) from None

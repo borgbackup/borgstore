@@ -8,7 +8,7 @@ from . import key, list_names
 from borgstore.backends._base import ItemInfo
 from borgstore.backends.posixfs import PosixFS
 from borgstore.backends.sftp import Sftp
-from borgstore.constants import ROOTNS
+from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
 @pytest.fixture()
@@ -25,11 +25,11 @@ def posixfs_backend(tmp_path):
 
 def get_sftp_backend():
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
-    return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
+    # return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
     # for tests with higher latency:
-    # return Sftp(
-    #    username="twaldmann", hostname="shell.ipv4.thinkmo.de", port=2222, path="/home/twaldmann/borgstore/temp-store"
-    # )
+    return Sftp(
+        username="twaldmann", hostname="shell.ipv4.thinkmo.de", port=2222, path="/home/twaldmann/borgstore/temp-store"
+    )
 
 
 def check_sftp_available():
@@ -215,6 +215,15 @@ def test_list(tested_backends, request):
 
     with pytest.raises(KeyError):
         list(backend.list("nonexistent"))
+
+
+def test_list_temporary_item(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    # usually, one must never use a key with TMP_SUFFIX, but we do it here
+    # for the sake of creating an item with such a name (somehow like if a
+    # temporary item was accidentally left in the backend storage).
+    backend.store("file-while-uploading" + TMP_SUFFIX, b"value")
+    assert list(backend.list(ROOTNS)) == []  # .list must not yield tmp files
 
 
 @pytest.mark.parametrize("exp", range(9))

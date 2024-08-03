@@ -178,8 +178,9 @@ class Sftp(BackendBase):
         validate_name(name)
         try:
             for st in self.client.listdir_attr(name):
-                is_dir = stat.S_ISDIR(st.st_mode)
-                size = 0 if is_dir else st.st_size
-                yield ItemInfo(name=st.filename, exists=True, size=size, directory=is_dir)
+                if not st.filename.endswith(TMP_SUFFIX):
+                    is_dir = stat.S_ISDIR(st.st_mode)
+                    size = 0 if is_dir else st.st_size
+                    yield ItemInfo(name=st.filename, exists=True, size=size, directory=is_dir)
         except FileNotFoundError:
             raise KeyError(name) from None

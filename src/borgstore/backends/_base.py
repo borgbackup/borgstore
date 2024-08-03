@@ -96,4 +96,8 @@ class BackendBase(ABC):
 
     @abstractmethod
     def list(self, name: str) -> Iterator[ItemInfo]:
-        """list the contents of <name>, non-recursively"""
+        """list the contents of <name>, non-recursively.
+
+        Does not yield TMP_SUFFIX items - usually they are either not finished
+        uploading or they are leftover crap from aborted uploads.
+        """
