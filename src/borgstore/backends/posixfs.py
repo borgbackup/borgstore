@@ -9,7 +9,7 @@ import stat
 import tempfile
 
 from ._base import BackendBase, ItemInfo, validate_name
-from ..constants import TEMP_PREFIX
+from ..constants import TMP_SUFFIX
 
 
 def get_file_backend(url):
@@ -89,7 +89,7 @@ class PosixFS(BackendBase):
         tmp_dir.mkdir(parents=True, exist_ok=True)
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
-        with tempfile.NamedTemporaryFile(prefix=TEMP_PREFIX, dir=tmp_dir, delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
             f.write(value)
             f.flush()
             fd = f.fileno()

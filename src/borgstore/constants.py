@@ -3,8 +3,8 @@
 # namespace that needs to be given to list from the root of the storage:
 ROOTNS = ""
 
-# filename prefixes / suffixes used for special purposes
-TEMP_PREFIX = "temp-"  # temp file while being uploaded / written
+# filename suffixes used for special purposes
+TMP_SUFFIX = ".tmp"  # temporary file while being uploaded / written
 DEL_SUFFIX = ".del"  # "soft deleted" item, undelete possible
 
 # max name length (not precise, suffixes might be added!)

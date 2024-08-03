@@ -9,7 +9,7 @@ import stat
 import paramiko
 
 from ._base import BackendBase, ItemInfo, validate_name
-from ..constants import TEMP_PREFIX
+from ..constants import TMP_SUFFIX
 
 
 def get_sftp_backend(url):
@@ -142,7 +142,7 @@ class Sftp(BackendBase):
         self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
-        tmp_name = str(tmp_dir / (TEMP_PREFIX + "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8))))
+        tmp_name = str(tmp_dir / ("".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8)) + TMP_SUFFIX))
         with self.client.open(tmp_name, mode="w") as f:
             f.set_pipelined(True)  # speeds up the following write() significantly!
             f.write(value)
