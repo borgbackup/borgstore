@@ -23,6 +23,16 @@ def posixfs_backend(tmp_path):
         be.destroy()
 
 
+@pytest.fixture()
+def posixfs_backend_created(tmp_path):
+    be = PosixFS(tmp_path / "store")
+    be.create()
+    try:
+        yield be
+    finally:
+        be.destroy()
+
+
 def get_sftp_backend():
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
     # return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
@@ -56,6 +66,16 @@ def sftp_backend():
         yield be
     finally:
         be.close()
+        be.destroy()
+
+
+@pytest.fixture(scope="function")
+def sftp_backend_created():
+    be = get_sftp_backend()
+    be.create()
+    try:
+        yield be
+    finally:
         be.destroy()
 
 

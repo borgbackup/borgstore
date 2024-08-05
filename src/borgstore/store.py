@@ -41,6 +41,14 @@ class Store:
     def destroy(self) -> None:
         self.backend.destroy()
 
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     def open(self) -> None:
         self.backend.open()
 
