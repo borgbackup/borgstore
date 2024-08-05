@@ -58,6 +58,14 @@ class BackendBase(ABC):
     def destroy(self):
         """completely remove the backend storage (and its contents)"""
 
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     @abstractmethod
     def open(self):
         """open (start using) a backend storage"""
