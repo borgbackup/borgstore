@@ -9,6 +9,7 @@ import stat
 import tempfile
 
 from ._base import BackendBase, ItemInfo, validate_name
+from .errors import BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen, ObjectNotFound
 from ..constants import TMP_SUFFIX
 
 
@@ -30,24 +31,32 @@ class PosixFS(BackendBase):
 
     def create(self):
         if self.opened:
-            raise self.MustNotBeOpen()
-        self.base_path.mkdir()
+            raise BackendMustNotBeOpen()
+        try:
+            self.base_path.mkdir()
+        except FileExistsError:
+            raise BackendAlreadyExists(f"posixfs storage base path already exists: {self.base_path}")
 
     def destroy(self):
         if self.opened:
-            raise self.MustNotBeOpen()
-        shutil.rmtree(os.fspath(self.base_path))
+            raise BackendMustNotBeOpen()
+        try:
+            shutil.rmtree(os.fspath(self.base_path))
+        except FileNotFoundError:
+            raise BackendDoesNotExist(f"posixfs storage base path does not exist: {self.base_path}")
 
     def open(self):
         if self.opened:
-            raise self.MustNotBeOpen()
+            raise BackendMustNotBeOpen()
         if not self.base_path.is_dir():
-            raise TypeError(f"storage base path does not exist or is not a directory: {self.base_path}")
+            raise BackendDoesNotExist(
+                f"posixfs storage base path does not exist or is not a directory: {self.base_path}"
+            )
         self.opened = True
 
     def close(self):
         if not self.opened:
-            raise self.MustBeOpen()
+            raise BackendMustBeOpen()
         self.opened = False
 
     def _validate_join(self, name):
@@ -55,17 +64,23 @@ class PosixFS(BackendBase):
         return self.base_path / name
 
     def mkdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         path.mkdir(parents=True, exist_ok=True)
 
     def rmdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
             path.rmdir()
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def info(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
             st = path.stat()
@@ -77,6 +92,8 @@ class PosixFS(BackendBase):
             return ItemInfo(name=path.name, exists=True, directory=is_dir, size=size)
 
     def load(self, name, *, size=None, offset=0):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
             with path.open("rb") as f:
@@ -84,9 +101,11 @@ class PosixFS(BackendBase):
                     f.seek(offset)
                 return f.read(-1 if size is None else size)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def store(self, name, value):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         tmp_dir = path.parent
         tmp_dir.mkdir(parents=True, exist_ok=True)
@@ -106,22 +125,28 @@ class PosixFS(BackendBase):
             raise
 
     def delete(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
             path.unlink()
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def move(self, curr_name, new_name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         curr_path = self._validate_join(curr_name)
         new_path = self._validate_join(new_name)
         try:
             new_path.parent.mkdir(parents=True, exist_ok=True)
             curr_path.replace(new_path)
         except FileNotFoundError:
-            raise KeyError(curr_name) from None
+            raise ObjectNotFound(curr_name) from None
 
     def list(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
             for p in path.iterdir():
@@ -135,4 +160,4 @@ class PosixFS(BackendBase):
                         size = 0 if is_dir else st.st_size
                         yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None

@@ -23,8 +23,7 @@ from collections import defaultdict
 from typing import Iterator, Optional
 
 from .utils.nesting import split_key
-from .backends._base import ItemInfo
-from .store import Store
+from .store import Store, ItemInfo, ObjectNotFound
 
 
 def create_bucket_map(buckets: list[int]) -> dict[int, list[int]]:
@@ -133,20 +132,20 @@ class MStore:
             store = self.stores[store_idx]
             try:
                 return store.info(name, deleted=deleted)
-            except KeyError:
+            except ObjectNotFound:
                 pass  # TODO: we expected the key to be there, but it was not. fix that by storing it there.
         else:
-            raise KeyError(name)  # didn't find it in any store
+            raise ObjectNotFound(name)  # didn't find it in any store
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         for store_idx in self._find_stores(name, mode="r"):
             store = self.stores[store_idx]
             try:
                 return store.load(name, size=size, offset=offset, deleted=deleted)
-            except KeyError:
+            except ObjectNotFound:
                 pass  # TODO: we expected the key to be there, but it was not. fix that by storing it there.
         else:
-            raise KeyError(name)  # didn't find it in any store
+            raise ObjectNotFound(name)  # didn't find it in any store
 
     def store(self, name: str, value: bytes) -> None:
         for store_idx in self._find_stores(name, mode="w"):
@@ -158,7 +157,7 @@ class MStore:
             store = self.stores[store_idx]
             try:
                 store.delete(name, deleted=deleted)
-            except KeyError:
+            except ObjectNotFound:
                 pass  # ignore it if it is already gone
 
     def move(
@@ -188,7 +187,7 @@ class MStore:
                     if not new_name:
                         raise ValueError("generic move needs new_name to be given.")
                     store.move(name, new_name, deleted=deleted)
-            except KeyError:
+            except ObjectNotFound:
                 pass  # ignore it, if it is not present in this store
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:

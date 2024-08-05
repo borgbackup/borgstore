@@ -41,15 +41,6 @@ def validate_name(name):
 
 
 class BackendBase(ABC):
-    class BackendException(Exception):
-        """backend exception base class"""
-
-    class MustNotBeOpen(BackendException):
-        """backend must not be open"""
-
-    class MustBeOpen(BackendException):
-        """backend must be open"""
-
     @abstractmethod
     def create(self):
         """create (initialize) a backend storage"""
