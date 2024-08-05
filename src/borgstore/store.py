@@ -6,6 +6,7 @@ from typing import Iterator, Optional
 
 from .utils.nesting import nest
 from .backends._base import ItemInfo, BackendBase
+from .backends.errors import ObjectNotFound  # noqa
 from .backends.posixfs import get_file_backend
 from .backends.sftp import get_sftp_backend
 from .constants import DEL_SUFFIX

@@ -6,6 +6,13 @@ import pytest
 from . import key, list_names
 
 from borgstore.backends._base import ItemInfo
+from borgstore.backends.errors import (
+    BackendAlreadyExists,
+    BackendDoesNotExist,
+    BackendMustBeOpen,
+    BackendMustNotBeOpen,
+    ObjectNotFound,
+)
 from borgstore.backends.posixfs import PosixFS
 from borgstore.backends.sftp import Sftp
 from borgstore.constants import ROOTNS, TMP_SUFFIX
@@ -106,10 +113,10 @@ def test_flat(tested_backends, request):
 
         assert not backend.info(k42).exists
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.load(k42)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.delete(k42)
 
 
@@ -158,18 +165,18 @@ def test_namespaced(tested_backends, request):
 
         assert not backend.info(ns0 + "/" + k42).exists
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.load(ns0 + "/" + k42)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.delete(ns0 + "/" + k42)
 
         assert not backend.info(ns42 + "/" + k42).exists
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.load(ns42 + "/" + k42)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             backend.delete(ns42 + "/" + k42)
 
         backend.rmdir(ns0)
@@ -205,7 +212,7 @@ def test_list(tested_backends, request):
         items = list(backend.list("dir"))
         assert items == []
 
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             list(backend.list("nonexistent"))
 
 
@@ -234,3 +241,52 @@ def test_load_partial(tested_backends, request):
         assert backend.load("key", size=3) == b"012"
         assert backend.load("key", offset=5) == b"56789"
         assert backend.load("key", offset=4, size=4) == b"4567"
+
+
+def test_already_exists(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    with pytest.raises(BackendAlreadyExists):
+        backend.create()
+
+
+def test_does_not_exist(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    # the backend is already created, but we do not want this here:
+    backend.destroy()
+    # now the backend does not exist anymore, trying to destroy it again errors:
+    with pytest.raises(BackendDoesNotExist):
+        backend.destroy()
+    # create the backend again, so the context manager can happily destroy it:
+    backend.create()
+
+
+def test_must_be_open(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    with pytest.raises(BackendMustBeOpen):
+        list(backend.list("dir"))
+    with pytest.raises(BackendMustBeOpen):
+        backend.mkdir("dir")
+    with pytest.raises(BackendMustBeOpen):
+        backend.rmdir("dir")
+    with pytest.raises(BackendMustBeOpen):
+        backend.store("key", b"value")
+    with pytest.raises(BackendMustBeOpen):
+        backend.load("key")
+    with pytest.raises(BackendMustBeOpen):
+        backend.info("key")
+    with pytest.raises(BackendMustBeOpen):
+        backend.move("key", "otherkey")
+    with pytest.raises(BackendMustBeOpen):
+        backend.close()
+
+
+def test_must_not_be_open(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    backend.open()
+    with pytest.raises(BackendMustNotBeOpen):
+        backend.open()
+    with pytest.raises(BackendMustNotBeOpen):
+        backend.create()
+    with pytest.raises(BackendMustNotBeOpen):
+        backend.destroy()
+    backend.close()  # needed for test teardown to succeed

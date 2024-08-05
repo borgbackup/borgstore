@@ -5,6 +5,7 @@ import pytest
 
 from . import key, lkey, list_store_names
 
+from borgstore.backends.errors import ObjectNotFound
 from borgstore.store import Store
 from borgstore.mstore import create_bucket_map, lookup_stores, MStore
 
@@ -130,14 +131,14 @@ def test_load_store_list_redundancy(mstore_mirror_created):
             mstore.stores[0].delete(lkey(i))
         # check if it is really gone:
         for i in 0, 23, 42, 1001:
-            with pytest.raises(KeyError):
+            with pytest.raises(ObjectNotFound):
                 mstore.stores[0].load(lkey(i))
         # delete other stuff from store 1:
         for i in 123, 456, 789:
             mstore.stores[1].delete(lkey(i))
         # check if it is really gone:
         for i in 123, 456, 789:
-            with pytest.raises(KeyError):
+            with pytest.raises(ObjectNotFound):
                 mstore.stores[1].load(lkey(i))
         # check if we can still read everything from the mirror:
         for i in range(1024):
@@ -152,7 +153,7 @@ def test_load_store_list_redundancy(mstore_mirror_created):
             mstore.stores[0].delete(lkey(i))
         # now the mirror is expected to be partially corrupted at these places:
         for i in 0, 23, 42, 1001, 123, 456, 789:
-            with pytest.raises(KeyError):
+            with pytest.raises(ObjectNotFound):
                 mstore.load(lkey(i))
         # list is expected to miss some elements:
         assert list_store_names(mstore, "") == sorted(
@@ -189,13 +190,13 @@ def test_namespaces(mstore_jbod_created):
         # hex-hash kind of data should be spread into buckets according to its hash:
         assert st0.load("data/0000") == b"value_00"
         assert st0.load("data/bf00") == b"value_bf"
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             st0.load("data/c000")
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             st0.load("data/ff00")
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             st1.load("data/0000")
-        with pytest.raises(KeyError):
+        with pytest.raises(ObjectNotFound):
             st1.load("data/bf00")
         assert st1.load("data/c000") == b"value_c0"
         assert st1.load("data/ff00") == b"value_ff"

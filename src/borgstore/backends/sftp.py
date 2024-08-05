@@ -9,6 +9,7 @@ import stat
 import paramiko
 
 from ._base import BackendBase, ItemInfo, validate_name
+from .errors import BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists, ObjectNotFound
 from ..constants import TMP_SUFFIX
 
 
@@ -46,10 +47,12 @@ class Sftp(BackendBase):
 
     def create(self):
         if self.opened:
-            raise self.MustNotBeOpen()
+            raise BackendMustNotBeOpen()
         self._connect()
         try:
-            self._mkdir(self.base_path, parents=True, exist_ok=False)
+            self._mkdir(self.base_path, parents=False, exist_ok=False)
+        except (FileExistsError, IOError):
+            raise BackendAlreadyExists(f"sftp storage base path already exists: {self.base_path}")
         finally:
             self._disconnect()
 
@@ -65,26 +68,28 @@ class Sftp(BackendBase):
             self.client.rmdir(str(parent))
 
         if self.opened:
-            raise self.MustNotBeOpen()
+            raise BackendMustNotBeOpen()
         self._connect()
         try:
             delete_recursive(self.base_path)
+        except FileNotFoundError:
+            raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}")
         finally:
             self._disconnect()
 
     def open(self):
         if self.opened:
-            raise self.MustNotBeOpen()
+            raise BackendMustNotBeOpen()
         self._connect()
         st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
         if not stat.S_ISDIR(st.st_mode):
-            raise TypeError(f"sftp storage base path is not a directory: {self.base_path}")
+            raise BackendDoesNotExist(f"sftp storage base path is not a directory: {self.base_path}")
         self.client.chdir(self.base_path)  # this sets the cwd we work in!
         self.opened = True
 
     def close(self):
         if not self.opened:
-            raise self.MustBeOpen()
+            raise BackendMustBeOpen()
         self._disconnect()
         self.opened = False
 
@@ -106,17 +111,23 @@ class Sftp(BackendBase):
                 raise
 
     def mkdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         self._mkdir(name, parents=True, exist_ok=True)
 
     def rmdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         try:
             self.client.rmdir(name)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def info(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         try:
             st = self.client.stat(name)
@@ -128,6 +139,8 @@ class Sftp(BackendBase):
             return ItemInfo(name=name, exists=True, directory=is_dir, size=size)
 
     def load(self, name, *, size=None, offset=0):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         try:
             with self.client.open(name) as f:
@@ -135,9 +148,11 @@ class Sftp(BackendBase):
                 f.prefetch(size)  # speeds up the following read() significantly!
                 return f.read(size)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def store(self, name, value):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         tmp_dir = Path(name).parent
         self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
@@ -155,13 +170,17 @@ class Sftp(BackendBase):
             raise
 
     def delete(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         try:
             self.client.unlink(name)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
 
     def move(self, curr_name, new_name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(curr_name)
         validate_name(new_name)
         try:
@@ -173,9 +192,11 @@ class Sftp(BackendBase):
         try:
             self.client.rename(curr_name, new_name)  # use .posix_rename ?
         except FileNotFoundError:
-            raise KeyError(curr_name) from None
+            raise ObjectNotFound(curr_name) from None
 
     def list(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
         validate_name(name)
         try:
             for st in self.client.listdir_attr(name):
@@ -184,4 +205,4 @@ class Sftp(BackendBase):
                     size = 0 if is_dir else st.st_size
                     yield ItemInfo(name=st.filename, exists=True, size=size, directory=is_dir)
         except FileNotFoundError:
-            raise KeyError(name) from None
+            raise ObjectNotFound(name) from None
