@@ -233,3 +233,12 @@ def test_scalability_size(tested_backends, exp, request):
     key, value = "key", bytes(size)
     backend.store("key", value)
     assert backend.load("key") == value
+
+
+def test_load_partial(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    backend.store("key", b"0123456789")
+    assert backend.load("key") == b"0123456789"
+    assert backend.load("key", size=3) == b"012"
+    assert backend.load("key", offset=5) == b"56789"
+    assert backend.load("key", offset=4, size=4) == b"4567"

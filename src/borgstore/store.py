@@ -77,8 +77,8 @@ class Store:
     def info(self, name: str, *, deleted=False) -> ItemInfo:
         return self.backend.info(self.find(name, deleted=deleted))
 
-    def load(self, name: str, *, deleted=False) -> bytes:
-        return self.backend.load(self.find(name, deleted=deleted))
+    def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
+        return self.backend.load(self.find(name, deleted=deleted), size=size, offset=offset)
 
     def store(self, name: str, value: bytes) -> None:
         # note: using .find here will:

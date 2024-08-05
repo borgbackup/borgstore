@@ -239,3 +239,12 @@ def test_nesting_config(posixfs_backend):
     assert store.find("nested_two/something") == "nested_two/so/me/something"
     # we do not have a levels_config entry for this, default is no nesting:
     assert store.find("no_config/something") == "no_config/something"
+
+
+def test_load_partial(posixfs_backend):
+    store = Store(backend=posixfs_backend)
+    store.store("key", b"0123456789")
+    assert store.load("key") == b"0123456789"
+    assert store.load("key", size=3) == b"012"
+    assert store.load("key", offset=5) == b"56789"
+    assert store.load("key", offset=4, size=4) == b"4567"

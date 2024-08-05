@@ -130,11 +130,11 @@ class MStore:
         else:
             raise KeyError(name)  # didn't find it in any store
 
-    def load(self, name: str, *, deleted=False) -> bytes:
+    def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         for store_idx in self._find_stores(name, mode="r"):
             store = self.stores[store_idx]
             try:
-                return store.load(name, deleted=deleted)
+                return store.load(name, size=size, offset=offset, deleted=deleted)
             except KeyError:
                 pass  # TODO: we expected the key to be there, but it was not. fix that by storing it there.
         else:

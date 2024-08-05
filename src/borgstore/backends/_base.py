@@ -79,7 +79,7 @@ class BackendBase(ABC):
         """return information about <name>"""
 
     @abstractmethod
-    def load(self, name: str) -> bytes:
+    def load(self, name: str, *, size=None, offset=0) -> bytes:
         """load value from <name>"""
 
     @abstractmethod

@@ -127,12 +127,13 @@ class Sftp(BackendBase):
             size = 0 if is_dir else st.st_size
             return ItemInfo(name=name, exists=True, directory=is_dir, size=size)
 
-    def load(self, name):
+    def load(self, name, *, size=None, offset=0):
         validate_name(name)
         try:
             with self.client.open(name) as f:
-                f.prefetch()  # speeds up the following read() significantly!
-                return f.read()
+                f.seek(offset)
+                f.prefetch(size)  # speeds up the following read() significantly!
+                return f.read(size)
         except FileNotFoundError:
             raise KeyError(name) from None
 

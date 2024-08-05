@@ -76,10 +76,13 @@ class PosixFS(BackendBase):
             size = 0 if is_dir else st.st_size
             return ItemInfo(name=path.name, exists=True, directory=is_dir, size=size)
 
-    def load(self, name):
+    def load(self, name, *, size=None, offset=0):
         path = self._validate_join(name)
         try:
-            return path.read_bytes()
+            with path.open("rb") as f:
+                if offset > 0:
+                    f.seek(offset)
+                return f.read(-1 if size is None else size)
         except FileNotFoundError:
             raise KeyError(name) from None
 
