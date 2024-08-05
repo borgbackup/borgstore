@@ -45,7 +45,8 @@ API can be much simpler:
 - list: flat list of the items in the given namespace, with or without soft
   deleted items.
 - store: write a new item into the store (giving its key/value pair)
-- load: read a value from the store (giving its key)
+- load: read a value from the store (giving its key), partial loads giving
+  offset and/or size are supported.
 - info: get information about an item via its key (exists? size? ...)
 - delete: immediately remove an item from the store (giving its key)
 - move: implements rename, soft delete / undelete, move to current
@@ -107,6 +108,8 @@ Scalability
   sizes (like: more than free memory, more than backend storage limitations,
   etc.). If one deals with very large values, one usually cuts them into
   chunks before storing them into the store.
+- Partial loads improve performance by avoiding a full load if only a part
+  of the value is needed (e.g. a header with metadata).
 
 Want a demo?
 ------------
