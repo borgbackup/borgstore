@@ -1,3 +1,8 @@
+"""
+Generic exception classes used by all backends.
+"""
+
+
 class BackendError(Exception):
     """Base class for exceptions in this module."""
 
