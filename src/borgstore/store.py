@@ -1,5 +1,12 @@
 """
 Key/Value Store Implementation.
+
+Store internally uses a backend to store k/v data and adds some functionality:
+
+- backend creation from a URL
+- configurable nesting
+- recursive .list method
+- soft deletion
 """
 
 from typing import Iterator, Optional

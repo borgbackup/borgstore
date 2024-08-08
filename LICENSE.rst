@@ -1,4 +1,4 @@
-Copyright (C) 2023 Thomas Waldmann <twaldmann@thinkmo.de>
+Copyright (C) 2024 Thomas Waldmann <tw@waldmann-edv.de>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
