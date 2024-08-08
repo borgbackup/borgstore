@@ -1,7 +1,8 @@
 BorgStore
 =========
 
-A key/value store implementation in Python.
+A key/value store implementation in Python, supporting multiple backends,
+data redundancy and distribution.
 
 Keys
 ----
@@ -97,6 +98,15 @@ Currently, these storage backends are implemented:
 - SFTP (access a server via sftp, namespaces: directories, values: in key-named files)
 - (more might come in future)
 
+MStore
+------
+
+API of MStore is very similar to Store, but instead of directly using one backend
+only (like Store does), it uses multiple Stores internally to implement:
+
+- redundancy (keep same data at multiple places)
+- distribution (keep different data at multiple places)
+
 Scalability
 -----------
 
@@ -118,12 +128,28 @@ Run this to get instructions how to run the demo:
 
 python3 -m borgstore
 
+State of this project
+---------------------
+
+**API is still unstable and expected to change as development goes on.**
+
+**There will be no data migration tools involving development/testing releases,
+like e.g. upgrading a store from alpha1 to alpha2 or beta13 to release.**
+
+There are tests and they succeed for the basic functionality, so some of the
+stuff is already working well.
+
+There might be missing features or optimization potential, feedback welcome!
+
+There are a lot of possible, but still missing backends (like e.g. for cloud
+storage). If you want to create and support one: pull requests are welcome.
+
 Borg?
 -----
 
 Please note that this code is developed by the Borg Collective and hosted
 by the BorgBackup github organisation, but is currently **not** used by
-the BorgBackup (aka "borg") backup tool.
+the BorgBackup (aka "borg") backup tool stable release.
 
 License
 -------
