@@ -26,9 +26,10 @@ def get_file_backend(url):
 
 
 class PosixFS(BackendBase):
-    def __init__(self, path):
+    def __init__(self, path, *, do_fsync=False):
         self.base_path = Path(path)
         self.opened = False
+        self.do_fsync = do_fsync  # False = 26x faster, see #10
 
     def create(self):
         if self.opened:
@@ -114,9 +115,9 @@ class PosixFS(BackendBase):
         # so the store never sees partially written data.
         with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
             f.write(value)
-            f.flush()
-            fd = f.fileno()
-            os.fsync(fd)
+            if self.do_fsync:
+                f.flush()
+                os.fsync(f.fileno())
             tmp_path = Path(f.name)
         # all written and synced to disk, rename it to the final name:
         try:
