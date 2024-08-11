@@ -62,12 +62,16 @@ class MStore:
         if len(stores) != len(buckets):
             raise ValueError("stores list and buckets count list must have same length")
         self.stores = stores
+        self.buckets = buckets
         self.all_stores = list(range(len(self.stores)))
         self.map = create_bucket_map(buckets)
         # kinds = prefix -> kind, kind can be "hex-hash", "generic".
         kinds = kinds if kinds else {}
         # we accept kinds as a dict, but we rather want a list of (prefix, kind) tuples, longest prefix first:
         self.kinds = [entry for entry in sorted(kinds.items(), key=lambda item: len(item[0]), reverse=True)]
+
+    def __repr__(self):
+        return f"<MStore(stores={self.stores!r}, buckets={self.buckets!r}, kinds={self.kinds!r})>"
 
     def create(self) -> None:
         for store in self.stores:
