@@ -207,7 +207,9 @@ def test_list(tested_backends, request):
         assert len(items) == 3
         assert ItemInfo(name=k0, exists=True, size=len(v0), directory=False) in items
         assert ItemInfo(name=k1, exists=True, size=len(v1), directory=False) in items
-        assert ItemInfo(name="dir", exists=True, size=0, directory=True) in items
+        # currently, all backends return size==1 for directories as they can't reliably signal
+        # an empty directory via size==0.
+        assert ItemInfo(name="dir", exists=True, size=1, directory=True) in items
 
         items = list(backend.list("dir"))
         assert items == []

@@ -6,7 +6,7 @@ While this works for these tests, this is not recommended for production!
 """
 import pytest
 
-from . import key, list_store_names
+from . import key, list_store_names, list_store_names, list_store_names_sorted
 from .test_backends import posixfs_backend_created  # noqa
 from .test_backends import sftp_backend_created, sftp_is_available  # noqa
 
@@ -126,7 +126,7 @@ def test_upgrade_levels(posixfs_backend_created):
         store.store(k1, v1)
         assert store.find(k1) == "00/" + k1  # found on level 1
         assert store.info(k1) == ii1
-        assert list_store_names(store, ROOTNS) == [k0, k1]
+        assert list_store_names_sorted(store, ROOTNS) == [k0, k1]
         store.delete(k1)  # just to have it out of the way
 
         # check what happens when overwriting k0 (on level 0) with a new value:
@@ -164,7 +164,7 @@ def test_downgrade_levels(posixfs_backend_created):
         store.store(k0, v0)
         assert store.find(k0) == "" + k0  # found on level 0
         assert store.info(k0) == ii0
-        assert list_store_names(store, ROOTNS) == [k0, k1]
+        assert list_store_names_sorted(store, ROOTNS) == [k0, k1]
         store.delete(k0)  # just to have it out of the way
 
         # check what happens when overwriting k1 (on level 1) with a new value:
@@ -247,3 +247,28 @@ def test_load_partial(posixfs_backend_created):
         assert store.load("key", size=3) == b"012"
         assert store.load("key", offset=5) == b"56789"
         assert store.load("key", offset=4, size=4) == b"4567"
+
+
+def test_list_is_sorted(posixfs_backend_created):
+    # the flat list we get from backend.list is sorted.
+    # if all items are on the same level, this implies that store.list is also sorted,
+    # although it does no own sorting.
+    empty = b""
+    unsorted_keys = "0012", "0000", "9999", "9988", "5566", "6655", "3322", "3300"
+    sorted_keys = sorted(unsorted_keys)
+    levels_config = {
+        ROOTNS: [0],
+        "flat/": [0],
+        "nested_one/": [1],
+        "nested_two/": [2],
+    }  # trailing slashes are important
+    with Store(backend=posixfs_backend_created, levels=levels_config) as store:
+        for key in unsorted_keys:
+            store.store(f"flat/{key}", empty)
+        assert list_store_names(store, "flat") == sorted_keys
+        for key in unsorted_keys:
+            store.store(f"nested_one/{key}", empty)
+        assert list_store_names(store, "nested_one") == sorted_keys
+        for key in unsorted_keys:
+            store.store(f"nested_two/{key}", empty)
+        assert list_store_names(store, "nested_two") == sorted_keys

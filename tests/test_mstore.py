@@ -3,7 +3,7 @@ Testing for high-level MStore API.
 """
 import pytest
 
-from . import key, lkey, list_store_names
+from . import key, lkey, list_store_names, list_store_names_sorted
 
 from borgstore.backends.errors import ObjectNotFound
 from borgstore.store import Store
@@ -145,7 +145,7 @@ def test_load_store_list_redundancy(mstore_mirror_created):
             k, v = lkey(i), str(i).encode()
             assert mstore.load(k) == v
         # also check if list still works ok:
-        assert list_store_names(mstore, "") == sorted([lkey(i) for i in range(1024)])
+        assert list_store_names_sorted(mstore, "") == sorted([lkey(i) for i in range(1024)])
         # now delete some values also from the other side of the mirror:
         for i in 0, 23, 42, 1001:
             mstore.stores[1].delete(lkey(i))

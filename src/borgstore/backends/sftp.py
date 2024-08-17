@@ -200,10 +200,13 @@ class Sftp(BackendBase):
             raise BackendMustBeOpen()
         validate_name(name)
         try:
-            for st in self.client.listdir_attr(name):
-                if not st.filename.endswith(TMP_SUFFIX):
-                    is_dir = stat.S_ISDIR(st.st_mode)
-                    size = 0 if is_dir else st.st_size
-                    yield ItemInfo(name=st.filename, exists=True, size=size, directory=is_dir)
+            infos = self.client.listdir_attr(name)
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
+        else:
+            for info in sorted(infos, key=lambda i: i.filename):
+                if not info.filename.endswith(TMP_SUFFIX):
+                    is_dir = stat.S_ISDIR(info.st_mode)
+                    # sadly, there is no st_nlink, thus we can't return size=0 for empty dirs.
+                    size = 1 if is_dir else info.st_size
+                    yield ItemInfo(name=info.filename, exists=True, size=size, directory=is_dir)

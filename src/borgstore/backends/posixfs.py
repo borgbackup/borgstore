@@ -151,15 +151,19 @@ class PosixFS(BackendBase):
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
-            for p in path.iterdir():
-                try:
-                    st = p.stat()
-                except FileNotFoundError:
-                    pass
-                else:
-                    if not p.name.endswith(TMP_SUFFIX):
-                        is_dir = stat.S_ISDIR(st.st_mode)
-                        size = 0 if is_dir else st.st_size
-                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
+            paths = sorted(path.iterdir())
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
+        else:
+            for p in paths:
+                if not p.name.endswith(TMP_SUFFIX):
+                    try:
+                        st = p.stat()
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        is_dir = stat.S_ISDIR(st.st_mode)
+                        # sadly, there is no reliable(!) st_nlink, thus we can't return size=0 for empty dirs.
+                        # on macOS 13, it worked, on Linux (github CI), it didn't.
+                        size = 1 if is_dir else st.st_size
+                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)

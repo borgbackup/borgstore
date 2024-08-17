@@ -195,6 +195,7 @@ class MStore:
                 pass  # ignore it, if it is not present in this store
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
+        # when using multiple stores, the results yielded might be only partially sorted.
         seen = set()
         for store in self.stores:
             for item_info in store.list(name, deleted=deleted):
