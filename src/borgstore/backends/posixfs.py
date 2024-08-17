@@ -151,15 +151,18 @@ class PosixFS(BackendBase):
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         try:
-            for p in path.iterdir():
-                try:
-                    st = p.stat()
-                except FileNotFoundError:
-                    pass
-                else:
-                    if not p.name.endswith(TMP_SUFFIX):
-                        is_dir = stat.S_ISDIR(st.st_mode)
-                        size = 0 if is_dir else st.st_size
-                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
+            paths = sorted(path.iterdir())
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
+        else:
+            for p in paths:
+                if not p.name.endswith(TMP_SUFFIX):
+                    try:
+                        st = p.stat()
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        is_dir = stat.S_ISDIR(st.st_mode)
+                        # for a directory, we return size == 0 if there is nothing inside
+                        size = st.st_nlink - 2 if is_dir else st.st_size
+                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)

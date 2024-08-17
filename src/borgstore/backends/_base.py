@@ -99,4 +99,6 @@ class BackendBase(ABC):
 
         Does not yield TMP_SUFFIX items - usually they are either not finished
         uploading or they are leftover crap from aborted uploads.
+
+        The yielded ItemInfos are sorted alphabetically by name.
         """

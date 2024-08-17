@@ -151,6 +151,8 @@ class Store:
 
         If deleted is True and soft deleted items are encountered, they are yielded
         as if they were not deleted. Otherwise, they are ignored.
+
+        backend.list giving us sorted names implies store.list is also sorted, if all items are stored on same level.
         """
         # as the backend.list method only supports non-recursive listing and
         # also returns directories/namespaces we introduced for nesting, we do the
@@ -158,8 +160,10 @@ class Store:
         for info in self.backend.list(name):
             if info.directory:
                 # note: we only expect subdirectories from key nesting, but not namespaces nested into each other.
-                subdir_name = (name + "/" + info.name) if name else info.name
-                yield from self.list(subdir_name, deleted=deleted)
+                if info.size > 0:
+                    # if backend returns info.size == 0 for a directory, it indicates that there is nothing inside it.
+                    subdir_name = (name + "/" + info.name) if name else info.name
+                    yield from self.list(subdir_name, deleted=deleted)
             else:
                 is_deleted = info.name.endswith(DEL_SUFFIX)
                 if deleted and is_deleted:
