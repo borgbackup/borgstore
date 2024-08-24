@@ -165,7 +165,7 @@ class Sftp(BackendBase):
             f.write(value)
         # rename it to the final name:
         try:
-            self.client.rename(tmp_name, name)
+            self.client.posix_rename(tmp_name, name)
         except OSError:
             self.client.unlink(tmp_name)
             raise
@@ -191,7 +191,7 @@ class Sftp(BackendBase):
             # exists already?
             pass
         try:
-            self.client.rename(curr_name, new_name)  # use .posix_rename ?
+            self.client.posix_rename(curr_name, new_name)
         except FileNotFoundError:
             raise ObjectNotFound(curr_name) from None
 
