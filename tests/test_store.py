@@ -4,6 +4,7 @@ Testing for high-level Store API.
 For simplicity, a lot of tests do not use namespaces if they do not require more than one.
 While this works for these tests, this is not recommended for production!
 """
+
 import pytest
 
 from . import key, list_store_names, list_store_names, list_store_names_sorted

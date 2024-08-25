@@ -1,6 +1,7 @@
 """
 Testing for high-level MStore API.
 """
+
 import pytest
 
 from . import key, lkey, list_store_names, list_store_names_sorted
