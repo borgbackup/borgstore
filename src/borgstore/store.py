@@ -20,20 +20,24 @@ from typing import Iterator, Optional
 from .utils.nesting import nest
 from .backends._base import ItemInfo, BackendBase
 from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid  # noqa
-from .backends.posixfs import get_file_backend, PosixFS
+from .backends.posixfs import get_file_backend
 from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
 from .backends.s3 import get_s3_backend
+from .backends.rest import get_rest_backend
 from .constants import DEL_SUFFIX
 
 logger = logging.getLogger(__name__)
 
 
-def get_backend(url):
+def get_backend(url, permissions=None):
     """Parse backend URL and return a backend instance (or None)."""
-    backend = get_file_backend(url)
+    backend = get_file_backend(url, permissions=permissions)
     if backend is not None:
         return backend
+
+    if permissions is not None:
+        raise ValueError("Permissions are only supported for the 'file:' backend.")
 
     backend = get_sftp_backend(url)
     if backend is not None:
@@ -44,6 +48,10 @@ def get_backend(url):
         return backend
 
     backend = get_s3_backend(url)
+    if backend is not None:
+        return backend
+
+    backend = get_rest_backend(url)
     if backend is not None:
         return backend
 
@@ -58,18 +66,13 @@ class Store:
     ):
         self.url = url
         if backend is None and url is not None:
-            backend = get_backend(url)
+            backend = get_backend(url, permissions=permissions)
             if backend is None:
                 raise BackendURLInvalid(f"Invalid or unsupported Backend Storage URL: {url}")
         if backend is None:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
         self.set_levels(levels)
-        # the permissions system is only implemented in PosixFS, mainly to support easy application testing
-        # with stores with different permission setups, e.g. read-only, no-delete or full permissions.
-        # in production, such permissions need to be enforced server-side.
-        if permissions is not None and isinstance(backend, PosixFS):
-            backend.permissions = permissions
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
         self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us] -> [s]

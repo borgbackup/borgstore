@@ -4,6 +4,7 @@ Generic tests for the backend implementations.
 
 import os
 import sys
+import time
 from pathlib import Path
 import stat
 
@@ -24,6 +25,7 @@ from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.backends.rclone import get_rclone_backend
 from borgstore.backends.s3 import S3, get_s3_backend
+from borgstore.backends.rest import REST, get_rest_backend
 from borgstore.constants import ROOTNS
 
 is_win32 = sys.platform == "win32"
@@ -153,10 +155,33 @@ def s3_backend_created():
         be.destroy()
 
 
+@pytest.fixture(scope="function")
+def rest_backend_created(tmp_path):
+    from .test_server_rest import start_server
+
+    backend_url = tmp_path.as_uri()
+    address, port = "127.0.0.1", 0
+    username, password = "testuser", "testpassword"
+
+    server, thread = start_server(backend_url, address, port, username, password)
+    # wait a bit for the server to be ready
+    time.sleep(0.1)
+
+    host, assigned_port = server.server_address
+    backend = get_rest_backend(f"http://{username}:{password}@{host}:{assigned_port}/")
+    backend.create()
+    try:
+        yield backend
+    finally:
+        backend.destroy()
+        server.shutdown()
+        server.server_close()
+
+
 def pytest_generate_tests(metafunc):
     # Generates tests for misc. storages
     if "tested_backends" in metafunc.fixturenames:
-        tested_backends = ["posixfs_backend_created"]
+        tested_backends = ["posixfs_backend_created", "rest_backend_created"]
         if sftp_is_available:
             tested_backends += ["sftp_backend_created"]
         if rclone_is_available:
@@ -228,6 +253,27 @@ def test_sftp_url(url, username, hostname, port, path):
     assert backend.hostname == hostname
     assert backend.port == port  # note: 0 means "not given" (and will usually mean 22 in the end)
     assert backend.base_path == path
+
+
+@pytest.mark.parametrize(
+    "url,base_url,username,password",
+    [
+        ("http://username:password@hostname:2222/", "http://hostname:2222/", "username", "password"),
+        ("https://username:password@hostname/", "https://hostname/", "username", "password"),
+        ("http://hostname/", "http://hostname/", None, None),
+        ("https://hostname:8443/", "https://hostname:8443/", None, None),
+        ("http://user%20name:pass%20word@hostname/", "http://hostname/", "user name", "pass word"),
+    ],
+)
+def test_rest_url(url, base_url, username, password):
+    backend = get_rest_backend(url)
+    assert isinstance(backend, REST)
+    assert backend.base_url == base_url.rstrip("/")
+    if username is not None:
+        assert backend.auth.username == username
+        assert backend.auth.password == password
+    else:
+        assert backend.auth is None
 
 
 @pytest.mark.parametrize(

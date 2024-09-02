@@ -17,7 +17,7 @@ from .errors import ObjectNotFound, PermissionDenied
 from ..constants import TMP_SUFFIX
 
 
-def get_file_backend(url):
+def get_file_backend(url, permissions=None):
     # file:///absolute/path
     # notes:
     # - we only support **local** fs **absolute** paths.
@@ -41,10 +41,10 @@ def get_file_backend(url):
     if sys.platform in ("win32", "msys", "cygwin"):
         m = re.match(windows_file_regex, url, re.VERBOSE)
         if m:
-            return PosixFS(path=unquote(m["drive_and_path"]))
+            return PosixFS(path=unquote(m["drive_and_path"]), permissions=permissions)
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
-        return PosixFS(path=unquote(m["path"]))
+        return PosixFS(path=unquote(m["path"]), permissions=permissions)
 
 
 class PosixFS(BackendBase):
