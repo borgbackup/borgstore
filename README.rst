@@ -147,9 +147,8 @@ storage). If you want to create and support one: pull requests are welcome.
 Borg?
 -----
 
-Please note that this code is developed by the Borg Collective and hosted
-by the BorgBackup github organisation, but is currently **not** used by
-the BorgBackup (aka "borg") backup tool stable release.
+Please note that this code is currently **not** used by the stable release of
+BorgBackup (aka "borg"), but only by borg2 beta 10+ and master branch.
 
 License
 -------
