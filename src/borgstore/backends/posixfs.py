@@ -15,10 +15,12 @@ from ..constants import TMP_SUFFIX
 
 
 def get_file_backend(url):
-    # file:///var/backups/borgstore/first
+    # file:///absolute/path
+    # or
+    # file://relative/path (temporary hack, might change in future)
     file_regex = r"""
         file://
-        (?P<path>(/.*))
+        (?P<path>(.*))
     """
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
@@ -27,7 +29,7 @@ def get_file_backend(url):
 
 class PosixFS(BackendBase):
     def __init__(self, path, *, do_fsync=False):
-        self.base_path = Path(path)
+        self.base_path = Path(path).absolute()
         self.opened = False
         self.do_fsync = do_fsync  # False = 26x faster, see #10
 
