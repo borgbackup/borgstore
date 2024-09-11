@@ -17,7 +17,7 @@ from typing import Iterator, Optional
 
 from .utils.nesting import nest
 from .backends._base import ItemInfo, BackendBase
-from .backends.errors import ObjectNotFound  # noqa
+from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid  # noqa
 from .backends.posixfs import get_file_backend
 from .backends.sftp import get_sftp_backend
 from .constants import DEL_SUFFIX
@@ -43,9 +43,9 @@ class Store:
         if backend is None and url is not None:
             backend = get_backend(url)
             if backend is None:
-                raise ValueError(f"Invalid Backend Storage URL: {url}")
+                raise BackendURLInvalid(f"Invalid Backend Storage URL: {url}")
         if backend is None:
-            raise ValueError("You need to give a backend instance or a backend url.")
+            raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
