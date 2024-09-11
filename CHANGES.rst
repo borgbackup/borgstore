@@ -1,6 +1,17 @@
 ChangeLog
 =========
 
+Version 0.0.3 2024-09-xx
+------------------------
+
+- store: raise BE specific exceptions, #34
+- add Store.stats property, #25
+- bandwidth emulation via BORGSTORE_BANDWIDTH [bit/s], #24
+- latency emulation via BORGSTORE_LATENCY [us], #24
+- sftp: username is optional
+- fix demo code, also output stats
+
+
 Version 0.0.2 2024-09-10
 ------------------------
 
