@@ -11,6 +11,7 @@ Store internally uses a backend to store k/v data and adds some functionality:
 
 from collections import Counter
 from contextlib import contextmanager
+import os
 import time
 from typing import Iterator, Optional
 
@@ -47,6 +48,8 @@ class Store:
             raise ValueError("You need to give a backend instance or a backend url.")
         self.backend = backend
         self._stats: Counter = Counter()
+        # this is to emulate additional latency to what the backend actually offers:
+        self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us]
 
     def __repr__(self):
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
@@ -76,6 +79,8 @@ class Store:
         # do not use this in generators!
         start = time.perf_counter_ns()
         yield
+        if self.latency:
+            time.sleep(self.latency)
         end = time.perf_counter_ns()
         self._stats[f"{key}_calls"] += 1
         self._stats[f"{key}_time"] += end - start
@@ -212,7 +217,13 @@ class Store:
         # as the backend.list method only supports non-recursive listing and
         # also returns directories/namespaces we introduced for nesting, we do the
         # recursion here (and also we do not yield directory names from here).
+        start = time.perf_counter_ns()
         backend_list_iterator = self.backend.list(name)
+        if self.latency:
+            # we add the simulated latency once per backend.list iteration, not per element.
+            time.sleep(self.latency)
+        end = time.perf_counter_ns()
+        self._stats["list_time"] += end - start
         while True:
             start = time.perf_counter_ns()
             try:
