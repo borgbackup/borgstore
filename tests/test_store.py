@@ -90,6 +90,7 @@ def test_file_url(tmp_path):
     [
         ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
         ("sftp://username@hostname/some/path", "username", "hostname", 22, "/some/path"),
+        ("sftp://hostname/some/path", None, "hostname", 22, "/some/path"),
     ],
 )
 def test_sftp_url(url, username, hostname, port, path):

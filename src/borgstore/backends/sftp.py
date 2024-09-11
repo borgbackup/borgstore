@@ -6,6 +6,7 @@ from pathlib import Path
 import random
 import re
 import stat
+from typing import Optional
 
 import paramiko
 
@@ -16,10 +17,10 @@ from ..constants import TMP_SUFFIX
 
 def get_sftp_backend(url):
     # sftp://username@hostname:22/var/backups/borgstore/second
-    # note: must give user, host must be a hostname (not IP), must give path
+    # note: username and port optional, host must be a hostname (not IP), must give path
     sftp_regex = r"""
         sftp://
-        (?P<username>[^@]+)@
+        ((?P<username>[^@]+)@)?
         (?P<hostname>([^:/]+))(?::(?P<port>\d+))?
         (?P<path>(/.*))
     """
@@ -29,7 +30,7 @@ def get_sftp_backend(url):
 
 
 class Sftp(BackendBase):
-    def __init__(self, username: str, hostname: str, path: str, port: int = 22):
+    def __init__(self, hostname: str, path: str, port: int = 22, username: Optional[str] = None):
         self.username = username
         self.hostname = hostname
         self.port = port
