@@ -52,6 +52,9 @@ API can be much simpler:
 - delete: immediately remove an item from the store (giving its key)
 - move: implements rename, soft delete / undelete, move to current
   nesting level
+- stats: api call counters, time spent in api methods, data volume/throughput
+- latency/bandwidth emulator: can emulate higher latency and lower bandwidth
+  than what is actually provided by the backend.
 
 Automatic Nesting
 -----------------
