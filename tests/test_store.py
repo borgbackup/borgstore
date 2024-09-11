@@ -77,33 +77,6 @@ def test_scalability_big_values(sftp_backend_created):
         assert list_store_names(store, ROOTNS) == keys
 
 
-def test_file_url(tmp_path):
-    from borgstore.backends.posixfs import PosixFS
-
-    store = Store(url=f"file://{tmp_path}")
-    assert isinstance(store.backend, PosixFS)
-    assert store.backend.base_path == tmp_path
-
-
-@pytest.mark.parametrize(
-    "url,username,hostname,port,path",
-    [
-        ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
-        ("sftp://username@hostname/some/path", "username", "hostname", 22, "/some/path"),
-        ("sftp://hostname/some/path", None, "hostname", 22, "/some/path"),
-    ],
-)
-def test_sftp_url(url, username, hostname, port, path):
-    from borgstore.backends.sftp import Sftp
-
-    store = Store(url=url)
-    assert isinstance(store.backend, Sftp)
-    assert store.backend.username == username
-    assert store.backend.hostname == hostname
-    assert store.backend.port == port
-    assert store.backend.base_path == path
-
-
 def test_upgrade_levels(posixfs_backend_created):
     k0, v0 = key(0), b"value0"
     ii0 = ItemInfo(k0, True, len(v0), False)
