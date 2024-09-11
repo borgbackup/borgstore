@@ -50,6 +50,8 @@ class Store:
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
         self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us]
+        # this is to emulate less bandwidth than what the backend actually offers:
+        self.bandwidth = float(os.environ.get("BORGSTORE_BANDWIDTH", "0")) / 8  # [bits/s]
 
     def __repr__(self):
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
@@ -76,11 +78,18 @@ class Store:
 
     @contextmanager
     def _stats_updater(self, key):
+        """update call counters and overall times, also emulate latency and bandwidth"""
         # do not use this in generators!
+        volume_before = self._stats.get(f"{key}_volume", 0)
         start = time.perf_counter_ns()
         yield
-        if self.latency:
-            time.sleep(self.latency)
+        be_needed_ns = time.perf_counter_ns() - start
+        volume_after = self._stats.get(f"{key}_volume", 0)
+        volume = volume_after - volume_before
+        emulated_time = self.latency + (0 if not self.bandwidth else float(volume) / self.bandwidth)
+        remaining_time = emulated_time - be_needed_ns / 1e9
+        if remaining_time > 0.0:
+            time.sleep(remaining_time)
         end = time.perf_counter_ns()
         self._stats[f"{key}_calls"] += 1
         self._stats[f"{key}_time"] += end - start
