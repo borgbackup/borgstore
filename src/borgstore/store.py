@@ -9,6 +9,9 @@ Store internally uses a backend to store k/v data and adds some functionality:
 - soft deletion
 """
 
+from collections import Counter
+from contextlib import contextmanager
+import time
 from typing import Iterator, Optional
 
 from .utils.nesting import nest
@@ -43,6 +46,7 @@ class Store:
         if backend is None:
             raise ValueError("You need to give a backend instance or a backend url.")
         self.backend = backend
+        self._stats: Counter = Counter()
 
     def __repr__(self):
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
@@ -66,6 +70,44 @@ class Store:
 
     def close(self) -> None:
         self.backend.close()
+
+    @contextmanager
+    def _stats_updater(self, key):
+        # do not use this in generators!
+        start = time.perf_counter_ns()
+        yield
+        end = time.perf_counter_ns()
+        self._stats[f"{key}_calls"] += 1
+        self._stats[f"{key}_time"] += end - start
+
+    def _stats_update_volume(self, key, amount):
+        self._stats[f"{key}_volume"] += amount
+
+    @property
+    def stats(self):
+        """
+        return statistics like method call counters, overall time [ns], overall data volume, overall throughput.
+
+        please note that the stats values only consider what is seen on the Store api:
+
+        - there might be additional time spent by the caller, outside of Store, thus:
+
+          - real time is longer.
+          - real throughput is lower.
+        - there are some overheads not accounted for, e.g. the volume only adds up the data size of load and store.
+        - write buffering or cached reads might give a wrong impression.
+        """
+        st = dict(self._stats)  # copy Counter -> generic dict
+        for key in "info", "load", "store", "delete", "move", "list":
+            # make sure key is present, even if method was not called
+            st[f"{key}_calls"] += 0
+            # convert integer ns timings to float s
+            st[f"{key}_time"] = st.get(f"{key}_time", 0) / 1e9
+        for key in "load", "store":
+            v = st.get(f"{key}_volume", 0)
+            t = st.get(f"{key}_time", 0)
+            st[f"{key}_throughput"] = v / t
+        return st
 
     def _get_levels(self, name):
         """get levels from configuration depending on namespace"""
@@ -95,16 +137,22 @@ class Store:
         return nested_name
 
     def info(self, name: str, *, deleted=False) -> ItemInfo:
-        return self.backend.info(self.find(name, deleted=deleted))
+        with self._stats_updater("info"):
+            return self.backend.info(self.find(name, deleted=deleted))
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
-        return self.backend.load(self.find(name, deleted=deleted), size=size, offset=offset)
+        with self._stats_updater("load"):
+            result = self.backend.load(self.find(name, deleted=deleted), size=size, offset=offset)
+            self._stats_update_volume("load", len(result))
+            return result
 
     def store(self, name: str, value: bytes) -> None:
         # note: using .find here will:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
-        self.backend.store(self.find(name), value)
+        with self._stats_updater("store"):
+            self.backend.store(self.find(name), value)
+            self._stats_update_volume("store", len(value))
 
     def delete(self, name: str, *, deleted=False) -> None:
         """
@@ -112,7 +160,8 @@ class Store:
 
         See also .move(name, delete=True) for "soft" deletion.
         """
-        self.backend.delete(self.find(name, deleted=deleted))
+        with self._stats_updater("delete"):
+            self.backend.delete(self.find(name, deleted=deleted))
 
     def move(
         self,
@@ -143,7 +192,8 @@ class Store:
                 raise ValueError("generic move needs new_name to be given.")
             nested_name = self.find(name, deleted=deleted)
             nested_new_name = self.find(new_name, deleted=deleted)
-        self.backend.move(nested_name, nested_new_name)
+        with self._stats_updater("move"):
+            self.backend.move(nested_name, nested_new_name)
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         """
@@ -154,16 +204,30 @@ class Store:
 
         backend.list giving us sorted names implies store.list is also sorted, if all items are stored on same level.
         """
+        # we need this wrapper due to the recursion - we only want to increment list_calls once:
+        self._stats["list_calls"] += 1
+        yield from self._list(name, deleted=deleted)
+
+    def _list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         # as the backend.list method only supports non-recursive listing and
         # also returns directories/namespaces we introduced for nesting, we do the
         # recursion here (and also we do not yield directory names from here).
-        for info in self.backend.list(name):
+        backend_list_iterator = self.backend.list(name)
+        while True:
+            start = time.perf_counter_ns()
+            try:
+                info = next(backend_list_iterator)
+            except StopIteration:
+                break
+            finally:
+                end = time.perf_counter_ns()
+                self._stats["list_time"] += end - start
             if info.directory:
                 # note: we only expect subdirectories from key nesting, but not namespaces nested into each other.
                 if info.size > 0:
                     # if backend returns info.size == 0 for a directory, it indicates that there is nothing inside it.
                     subdir_name = (name + "/" + info.name) if name else info.name
-                    yield from self.list(subdir_name, deleted=deleted)
+                    yield from self._list(subdir_name, deleted=deleted)
             else:
                 is_deleted = info.name.endswith(DEL_SUFFIX)
                 if deleted and is_deleted:

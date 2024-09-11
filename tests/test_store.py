@@ -247,3 +247,35 @@ def test_list_is_sorted(posixfs_backend_created):
         for key in unsorted_keys:
             store.store(f"nested_two/{key}", empty)
         assert list_store_names(store, "nested_two") == sorted_keys
+
+
+def test_stats(posixfs_backend_created):
+    with Store(backend=posixfs_backend_created) as store:
+        key, value = "key", b""
+        assert store._stats == {}
+        # calls
+        store.store(key, value)
+        assert store._stats["store_calls"] == 1
+        store.store(key, value)
+        assert store._stats["store_calls"] == 2
+        store.load(key)
+        assert store._stats["load_calls"] == 1
+        assert store._stats["store_calls"] == 2
+        list(store.list(ROOTNS))
+        assert store._stats["list_calls"] == 1
+        # timings (in ns, thus > 0 in any case)
+        assert store._stats["list_time"] > 0
+        assert store._stats["load_time"] > 0
+        assert store._stats["store_time"] > 0
+        # volume
+        assert store._stats["load_volume"] == 0
+        assert store._stats["store_volume"] == 0
+        value = bytes(100)
+        store.store(key, value)
+        assert store._stats["store_volume"] == 100
+        store.store(key, value)
+        assert store._stats["store_volume"] == 200
+        store.load(key)
+        assert store._stats["load_volume"] == 100
+        store.load(key)
+        assert store._stats["load_volume"] == 200
