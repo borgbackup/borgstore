@@ -100,7 +100,7 @@ class Store:
         st = dict(self._stats)  # copy Counter -> generic dict
         for key in "info", "load", "store", "delete", "move", "list":
             # make sure key is present, even if method was not called
-            st[f"{key}_calls"] += 0
+            st[f"{key}_calls"] = st.get(f"{key}_calls", 0)
             # convert integer ns timings to float s
             st[f"{key}_time"] = st.get(f"{key}_time", 0) / 1e9
         for key in "load", "store":
