@@ -1,6 +1,7 @@
 """
 Generic testing for the misc. backend implementations.
 """
+from pathlib import Path
 
 import pytest
 
@@ -14,8 +15,8 @@ from borgstore.backends.errors import (
     BackendMustNotBeOpen,
     ObjectNotFound,
 )
-from borgstore.backends.posixfs import PosixFS
-from borgstore.backends.sftp import Sftp
+from borgstore.backends.posixfs import PosixFS, get_file_backend
+from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
@@ -29,7 +30,7 @@ def posixfs_backend_created(tmp_path):
         be.destroy()
 
 
-def get_sftp_backend():
+def _get_sftp_backend():
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
     # return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
     # for tests with higher latency:
@@ -41,7 +42,7 @@ def get_sftp_backend():
 def check_sftp_available():
     """in some test environments, get_sftp_backend() does not result in a working sftp backend"""
     try:
-        be = get_sftp_backend()
+        be = _get_sftp_backend()
         be.create()  # first sftp activity happens here
     except Exception:
         return False
@@ -55,7 +56,7 @@ sftp_is_available = check_sftp_available()
 
 @pytest.fixture(scope="function")
 def sftp_backend_created():
-    be = get_sftp_backend()
+    be = _get_sftp_backend()
     be.create()
     try:
         yield be
@@ -75,6 +76,36 @@ def pytest_generate_tests(metafunc):
 def get_backend_from_fixture(tested_backends, request):
     # returns the backend object from the fixture for tests that run on misc. backends
     return request.getfixturevalue(tested_backends)
+
+
+@pytest.mark.parametrize(
+    "url,path",
+    [
+        ("file:///absolute/path", "/absolute/path"),  # first 2 slashes are to introduce host (empty here)
+        ("file://relative/path", "relative/path"),  # TODO: fix this, see #23
+    ],
+)
+def test_file_url(url, path):
+    backend = get_file_backend(url)
+    assert isinstance(backend, PosixFS)
+    assert backend.base_path == Path(path).absolute()
+
+
+@pytest.mark.parametrize(
+    "url,username,hostname,port,path",
+    [
+        ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
+        ("sftp://username@hostname/some/path", "username", "hostname", 22, "/some/path"),
+        ("sftp://hostname/some/path", None, "hostname", 22, "/some/path"),
+    ],
+)
+def test_sftp_url(url, username, hostname, port, path):
+    backend = get_sftp_backend(url)
+    assert isinstance(backend, Sftp)
+    assert backend.username == username
+    assert backend.hostname == hostname
+    assert backend.port == port
+    assert backend.base_path == path
 
 
 def test_flat(tested_backends, request):
