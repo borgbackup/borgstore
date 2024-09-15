@@ -31,13 +31,23 @@ def posixfs_backend_created(tmp_path):
         be.destroy()
 
 
-def _get_sftp_backend():
+def _get_sftp_backend(local=False, remote_url=False, remote_config=True):
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
-    # return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
+    if local:
+        return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
     # for tests with higher latency:
-    return Sftp(
-        username="twaldmann", hostname="shell.ipv4.thinkmo.de", port=2222, path="/home/twaldmann/borgstore/temp-store"
-    )
+    if remote_url:
+        return Sftp(
+            username="twaldmann",
+            hostname="shell.ipv4.thinkmo.de",
+            port=2222,
+            path="/home/twaldmann/borgstore/temp-store",
+        )
+    # same as previous, but loads config for host "shell" from ~/.ssh/config:
+    if remote_config:
+        return Sftp(hostname="shell", path="/home/twaldmann/borgstore/temp-store")
+
+    raise ValueError("check _get_sftp_backend() parameter defaults!")
 
 
 def check_sftp_available():
@@ -96,8 +106,8 @@ def test_file_url(url, path):
     "url,username,hostname,port,path",
     [
         ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
-        ("sftp://username@hostname/some/path", "username", "hostname", 22, "/some/path"),
-        ("sftp://hostname/some/path", None, "hostname", 22, "/some/path"),
+        ("sftp://username@hostname/some/path", "username", "hostname", 0, "/some/path"),
+        ("sftp://hostname/some/path", None, "hostname", 0, "/some/path"),
     ],
 )
 def test_sftp_url(url, username, hostname, port, path):
@@ -105,7 +115,7 @@ def test_sftp_url(url, username, hostname, port, path):
     assert isinstance(backend, Sftp)
     assert backend.username == username
     assert backend.hostname == hostname
-    assert backend.port == port
+    assert backend.port == port  # note: 0 means "not given" (and will usually mean 22 in the end)
     assert backend.base_path == path
 
 

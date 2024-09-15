@@ -26,21 +26,57 @@ def get_sftp_backend(url):
     """
     m = re.match(sftp_regex, url, re.VERBOSE)
     if m:
-        return Sftp(username=m["username"], hostname=m["hostname"], port=int(m["port"] or "22"), path=m["path"])
+        return Sftp(username=m["username"], hostname=m["hostname"], port=int(m["port"] or "0"), path=m["path"])
 
 
 class Sftp(BackendBase):
-    def __init__(self, hostname: str, path: str, port: int = 22, username: Optional[str] = None):
+    def __init__(self, hostname: str, path: str, port: int = 0, username: Optional[str] = None):
         self.username = username
         self.hostname = hostname
         self.port = port
         self.base_path = path
         self.opened = False
 
+    def _get_host_config_from_file(self, path: str, hostname: str):
+        """lookup the configuration for hostname in path (ssh config file)"""
+        config_path = Path(path).expanduser()
+        try:
+            ssh_config = paramiko.SSHConfig.from_path(config_path)
+        except FileNotFoundError:
+            return paramiko.SSHConfigDict()  # empty dict
+        else:
+            return ssh_config.lookup(hostname)
+
+    def _get_host_config(self):
+        """assemble all given and configured host config values"""
+        host_config = paramiko.SSHConfigDict()
+        # self.hostname might be an alias/shortcut (with real hostname given in configuration),
+        # but there might be also nothing in the configs at all for self.hostname:
+        host_config["hostname"] = self.hostname
+        # first process system-wide ssh config, then override with user ssh config:
+        host_config.update(self._get_host_config_from_file("/etc/ssh/ssh_config", self.hostname))
+        # note: no support yet for /etc/ssh/ssh_config.d/*
+        host_config.update(self._get_host_config_from_file("~/.ssh/config", self.hostname))
+        # now override configured values with given values
+        if self.username is not None:
+            host_config.update({"user": self.username})
+        if self.port != 0:
+            host_config.update({"port": self.port})
+        # make sure port is present and is an int
+        host_config["port"] = int(host_config.get("port") or 22)
+        return host_config
+
     def _connect(self):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(hostname=self.hostname, username=self.username, port=self.port, allow_agent=True)
+        host_config = self._get_host_config()
+        ssh.connect(
+            hostname=host_config["hostname"],
+            username=host_config.get("user"),  # if None, paramiko will use current user
+            port=host_config["port"],
+            key_filename=host_config.get("identityfile"),  # list of keys, ~ is already expanded
+            allow_agent=True,
+        )
         self.client = ssh.open_sftp()
 
     def _disconnect(self):
