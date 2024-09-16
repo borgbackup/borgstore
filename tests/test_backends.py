@@ -2,6 +2,7 @@
 Generic testing for the misc. backend implementations.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -31,23 +32,12 @@ def posixfs_backend_created(tmp_path):
         be.destroy()
 
 
-def _get_sftp_backend(local=False, remote_url=False, remote_config=True):
-    # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
-    if local:
-        return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
-    # for tests with higher latency:
-    if remote_url:
-        return Sftp(
-            username="twaldmann",
-            hostname="shell.ipv4.thinkmo.de",
-            port=2222,
-            path="/home/twaldmann/borgstore/temp-store",
-        )
-    # same as previous, but loads config for host "shell" from ~/.ssh/config:
-    if remote_config:
-        return Sftp(hostname="shell", path="/home/twaldmann/borgstore/temp-store")
-
-    raise ValueError("check _get_sftp_backend() parameter defaults!")
+def _get_sftp_backend():
+    # export BORGSTORE_TEST_SFTP_URL="sftp://user@host:port/home/user/borgstore/temp-store"
+    # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't.
+    url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
+    if url:
+        return get_sftp_backend(url)
 
 
 def check_sftp_available():
@@ -56,7 +46,7 @@ def check_sftp_available():
         be = _get_sftp_backend()
         be.create()  # first sftp activity happens here
     except Exception:
-        return False
+        return False  # use "raise" here for debugging sftp store issues
     else:
         be.destroy()
         return True
