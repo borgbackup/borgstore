@@ -68,7 +68,10 @@ class Sftp(BackendBase):
 
     def _connect(self):
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # note: we do not deal with unknown hosts and ssh.set_missing_host_key_policy here,
+        # the user shall just make "first contact" to any new host using ssh or sftp cli command
+        # and interactively verify remote host fingerprints.
+        ssh.load_system_host_keys()  # this is documented to load the USER's known_hosts file
         host_config = self._get_host_config()
         ssh.connect(
             hostname=host_config["hostname"],
