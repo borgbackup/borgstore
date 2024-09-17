@@ -1,15 +1,18 @@
 ChangeLog
 =========
 
-Version 0.0.3 2024-09-xx
+Version 0.0.3 2024-09-17
 ------------------------
 
+- sftp: add support for ~/.ssh/config, #37
+- sftp: username is optional, #27
+- load known_hosts, remove AutoAddPolicy, #39
 - store: raise BE specific exceptions, #34
 - add Store.stats property, #25
 - bandwidth emulation via BORGSTORE_BANDWIDTH [bit/s], #24
 - latency emulation via BORGSTORE_LATENCY [us], #24
-- sftp: username is optional
 - fix demo code, also output stats
+- tests: BORGSTORE_TEST_SFTP_URL to set sftp test server
 
 
 Version 0.0.2 2024-09-10
