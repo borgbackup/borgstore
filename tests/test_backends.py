@@ -2,6 +2,7 @@
 Generic testing for the misc. backend implementations.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -32,12 +33,11 @@ def posixfs_backend_created(tmp_path):
 
 
 def _get_sftp_backend():
-    # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't:
-    # return Sftp(username="tw", hostname="localhost", path="/Users/tw/w/borgstore/temp-store")
-    # for tests with higher latency:
-    return Sftp(
-        username="twaldmann", hostname="shell.ipv4.thinkmo.de", port=2222, path="/home/twaldmann/borgstore/temp-store"
-    )
+    # export BORGSTORE_TEST_SFTP_URL="sftp://user@host:port/home/user/borgstore/temp-store"
+    # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't.
+    url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
+    if url:
+        return get_sftp_backend(url)
 
 
 def check_sftp_available():
@@ -46,7 +46,7 @@ def check_sftp_available():
         be = _get_sftp_backend()
         be.create()  # first sftp activity happens here
     except Exception:
-        return False
+        return False  # use "raise" here for debugging sftp store issues
     else:
         be.destroy()
         return True
@@ -96,8 +96,8 @@ def test_file_url(url, path):
     "url,username,hostname,port,path",
     [
         ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
-        ("sftp://username@hostname/some/path", "username", "hostname", 22, "/some/path"),
-        ("sftp://hostname/some/path", None, "hostname", 22, "/some/path"),
+        ("sftp://username@hostname/some/path", "username", "hostname", 0, "/some/path"),
+        ("sftp://hostname/some/path", None, "hostname", 0, "/some/path"),
     ],
 )
 def test_sftp_url(url, username, hostname, port, path):
@@ -105,7 +105,7 @@ def test_sftp_url(url, username, hostname, port, path):
     assert isinstance(backend, Sftp)
     assert backend.username == username
     assert backend.hostname == hostname
-    assert backend.port == port
+    assert backend.port == port  # note: 0 means "not given" (and will usually mean 22 in the end)
     assert backend.base_path == path
 
 
