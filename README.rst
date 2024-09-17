@@ -53,8 +53,9 @@ API can be much simpler:
 - move: implements rename, soft delete / undelete, move to current
   nesting level
 - stats: api call counters, time spent in api methods, data volume/throughput
-- latency/bandwidth emulator: can emulate higher latency and lower bandwidth
-  than what is actually provided by the backend.
+- latency/bandwidth emulator: can emulate higher latency (via BORGSTORE_LATENCY
+  [us]) and lower bandwidth (via BORGSTORE_BANDWIDTH [bit/s]) than what is
+  actually provided by the backend.
 
 Automatic Nesting
 -----------------
