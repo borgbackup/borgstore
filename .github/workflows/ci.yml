@@ -63,6 +63,10 @@ jobs:
       with:
         # just fetching 1 commit is not enough for setuptools-scm, so we fetch all
         fetch-depth: 0
+    - name: Install Linux packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y rclone
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
