@@ -165,7 +165,4 @@ class PosixFS(BackendBase):
                         pass
                     else:
                         is_dir = stat.S_ISDIR(st.st_mode)
-                        # sadly, there is no reliable(!) st_nlink, thus we can't return size=0 for empty dirs.
-                        # on macOS 13, it worked, on Linux (github CI), it didn't.
-                        size = 1 if is_dir else st.st_size
-                        yield ItemInfo(name=p.name, exists=True, size=size, directory=is_dir)
+                        yield ItemInfo(name=p.name, exists=True, size=st.st_size, directory=is_dir)
