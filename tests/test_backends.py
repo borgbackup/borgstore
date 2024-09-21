@@ -172,7 +172,6 @@ def test_namespaced(tested_backends, request):
         ins0 = backend.info(ns0)
         assert ins0.exists
         assert ins0.directory
-        assert ins0.size == 0
 
         backend.mkdir(ns1)
         backend.store(ns1 + "/" + k1, v1)

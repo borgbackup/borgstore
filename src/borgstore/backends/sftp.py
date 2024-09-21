@@ -176,8 +176,7 @@ class Sftp(BackendBase):
             return ItemInfo(name=name, exists=False, directory=False, size=0)
         else:
             is_dir = stat.S_ISDIR(st.st_mode)
-            size = 0 if is_dir else st.st_size
-            return ItemInfo(name=name, exists=True, directory=is_dir, size=size)
+            return ItemInfo(name=name, exists=True, directory=is_dir, size=st.st_size)
 
     def load(self, name, *, size=None, offset=0):
         if not self.opened:
