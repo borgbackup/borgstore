@@ -176,8 +176,7 @@ class Sftp(BackendBase):
             return ItemInfo(name=name, exists=False, directory=False, size=0)
         else:
             is_dir = stat.S_ISDIR(st.st_mode)
-            size = 0 if is_dir else st.st_size
-            return ItemInfo(name=name, exists=True, directory=is_dir, size=size)
+            return ItemInfo(name=name, exists=True, directory=is_dir, size=st.st_size)
 
     def load(self, name, *, size=None, offset=0):
         if not self.opened:
@@ -247,6 +246,4 @@ class Sftp(BackendBase):
             for info in sorted(infos, key=lambda i: i.filename):
                 if not info.filename.endswith(TMP_SUFFIX):
                     is_dir = stat.S_ISDIR(info.st_mode)
-                    # sadly, there is no st_nlink, thus we can't return size=0 for empty dirs.
-                    size = 1 if is_dir else info.st_size
-                    yield ItemInfo(name=info.filename, exists=True, size=size, directory=is_dir)
+                    yield ItemInfo(name=info.filename, exists=True, size=info.st_size, directory=is_dir)

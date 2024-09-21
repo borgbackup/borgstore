@@ -247,10 +247,8 @@ class Store:
                 self._stats["list_time"] += end - start
             if info.directory:
                 # note: we only expect subdirectories from key nesting, but not namespaces nested into each other.
-                if info.size > 0:
-                    # if backend returns info.size == 0 for a directory, it indicates that there is nothing inside it.
-                    subdir_name = (name + "/" + info.name) if name else info.name
-                    yield from self._list(subdir_name, deleted=deleted)
+                subdir_name = (name + "/" + info.name) if name else info.name
+                yield from self._list(subdir_name, deleted=deleted)
             else:
                 is_deleted = info.name.endswith(DEL_SUFFIX)
                 if deleted and is_deleted:
