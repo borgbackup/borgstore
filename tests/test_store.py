@@ -10,6 +10,7 @@ import pytest
 from . import key, list_store_names, list_store_names, list_store_names_sorted
 from .test_backends import posixfs_backend_created  # noqa
 from .test_backends import sftp_backend_created, sftp_is_available  # noqa
+from .test_backends import rclone_backend_created, rclone_is_available  # noqa
 
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo
@@ -69,6 +70,20 @@ def test_scalability_big_values(sftp_backend_created):
     count = 10
     value = b"x" * 2**20
     with Store(backend=sftp_backend_created, levels=levels) as store:
+        keys = [key(i) for i in range(count)]
+        for k in keys:
+            store.store(k, value)
+        for k in keys:
+            assert store.load(k) == value
+        assert list_store_names(store, ROOTNS) == keys
+
+
+@pytest.mark.skipif(not rclone_is_available, reason="rclone is not available")
+def test_scalability_big_values_rclone(rclone_backend_created):
+    levels = {ROOTNS: [0]}
+    count = 10
+    value = b"x" * 2**20
+    with Store(backend=rclone_backend_created, levels=levels) as store:
         keys = [key(i) for i in range(count)]
         for k in keys:
             store.store(k, value)

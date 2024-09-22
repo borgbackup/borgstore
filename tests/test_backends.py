@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
+import tempfile
 
 from . import key, list_names
 
@@ -19,6 +20,7 @@ from borgstore.backends.errors import (
 )
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
+from borgstore.backends.rclone import Rclone, get_rclone_backend
 from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
@@ -52,12 +54,49 @@ def check_sftp_available():
         return True
 
 
+def _get_rclone_backend():
+    # To use a specific RCLONE backend
+    # export BORGSTORE_TEST_RCLONE_URL="rclone://remote:path"
+    # otherwise this will run an rclone backend in a temporary directory on local disk
+    url = os.environ.get("BORGSTORE_TEST_RCLONE_URL")
+    if not url:
+        tempdir = tempfile.mkdtemp()
+        # remove the temporary directory since we need to start without it
+        os.rmdir(tempdir)
+        url = f"rclone://{tempdir}"
+    return get_rclone_backend(url)
+
+
+def check_rclone_available():
+    """in some test environments, get_rclone_backend() does not result in a working rclone backend"""
+    try:
+        be = _get_rclone_backend()
+        be.create()  # first rclone activity happens here
+    except Exception as e:
+        print(f"Rclone backend create failed {repr(e)}")
+        return False  # use "raise" here for debugging rclone store issues
+    else:
+        be.destroy()
+        return True
+
+
 sftp_is_available = check_sftp_available()
+rclone_is_available = check_rclone_available()
 
 
 @pytest.fixture(scope="function")
 def sftp_backend_created():
     be = _get_sftp_backend()
+    be.create()
+    try:
+        yield be
+    finally:
+        be.destroy()
+
+
+@pytest.fixture(scope="function")
+def rclone_backend_created():
+    be = _get_rclone_backend()
     be.create()
     try:
         yield be
@@ -71,6 +110,8 @@ def pytest_generate_tests(metafunc):
         tested_backends = ["posixfs_backend_created"]
         if sftp_is_available:
             tested_backends += ["sftp_backend_created"]
+        if rclone_is_available:
+            tested_backends += ["rclone_backend_created"]
         metafunc.parametrize("tested_backends", tested_backends)
 
 
