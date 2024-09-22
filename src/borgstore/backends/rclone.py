@@ -12,8 +12,14 @@ from typing import Iterator
 import threading
 
 from ._base import BackendBase, ItemInfo, validate_name
-from .errors import (BackendError, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen,
-                     BackendAlreadyExists, ObjectNotFound)
+from .errors import (
+    BackendError,
+    BackendDoesNotExist,
+    BackendMustNotBeOpen,
+    BackendMustBeOpen,
+    BackendAlreadyExists,
+    ObjectNotFound,
+)
 from ..constants import TMP_SUFFIX
 
 # rclone binary - expected to be on the path
@@ -23,6 +29,7 @@ RCLONE = "rclone"
 if False:
     import logging
     import http.client as http_client
+
     http_client.HTTPConnection.debuglevel = 1
     logging.basicConfig()
     logging.getLogger().setLevel(logging.DEBUG)
@@ -77,20 +84,19 @@ class Rclone(BackendBase):
             raise BackendMustNotBeOpen()
         # Open rclone rcd listening on a random port with random auth
         args = [
-            RCLONE, "rcd",
-            "--rc-user", self.user,
-            "--rc-addr", self.HOST+":0",
+            RCLONE,
+            "rcd",
+            "--rc-user",
+            self.user,
+            "--rc-addr",
+            self.HOST + ":0",
             "--rc-serve",
             "--use-server-modtime",
         ]
         env = os.environ.copy()
         env["RCLONE_RC_PASS"] = self.password  # pass password by env var so it isn't in process list
         self.process = subprocess.Popen(
-            args,
-            stderr=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            env=env,
+            args, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=env
         )
         # Read the log line with the port in it
         line = self.process.stderr.readline()
@@ -105,6 +111,7 @@ class Rclone(BackendBase):
                 line = self.process.stderr.readline()
                 if not line:
                     break  # Process has finished
+
         thread = threading.Thread(target=discard)
         thread.start()
 
@@ -143,12 +150,7 @@ class Rclone(BackendBase):
         """
         if not self.url:
             raise BackendMustBeOpen()
-        r = self._requests(
-            requests.post,
-            self.url+command,
-            json=json_input,
-            **kwargs,
-        )
+        r = self._requests(requests.post, self.url + command, json=json_input, **kwargs)
         return r.json()
 
     def create(self):
@@ -169,10 +171,7 @@ class Rclone(BackendBase):
             info = self.info("")
             if not info.exists:
                 raise BackendDoesNotExist(f"rclone storage base path does not exist: {self.fs}")
-            self._rpc("operations/purge", {
-                "fs": self.fs,
-                "remote": "",
-            })
+            self._rpc("operations/purge", {"fs": self.fs, "remote": ""})
 
     def __enter__(self):
         self.open()
@@ -185,22 +184,15 @@ class Rclone(BackendBase):
     def mkdir(self, name: str) -> None:
         """create directory/namespace <name>"""
         validate_name(name)
-        self._rpc("operations/mkdir", {
-            "fs": self.fs,
-            "remote": name,
-        })
+        self._rpc("operations/mkdir", {"fs": self.fs, "remote": name})
 
     def rmdir(self, name: str) -> None:
         """remove directory/namespace <name>"""
         validate_name(name)
-        self._rpc("operations/rmdir", {
-            "fs": self.fs,
-            "remote": name,
-        })
+        self._rpc("operations/rmdir", {"fs": self.fs, "remote": name})
 
     def _to_item_info(self, remote, item):
-        """Converts an rclone item at remote into a borgstore ItemInfo
-        """
+        """Converts an rclone item at remote into a borgstore ItemInfo"""
         if item is None:
             return ItemInfo(name=os.path.basename(remote), exists=False, directory=False, size=0)
         name = item["Name"]
@@ -212,15 +204,10 @@ class Rclone(BackendBase):
         """return information about <name>"""
         validate_name(name)
         try:
-            result = self._rpc("operations/stat", {
-                "fs": self.fs,
-                "remote": name,
-                "opt": {
-                    "recurse": False,
-                    "noModTime": True,
-                    "noMimeType": True,
-                },
-            })
+            result = self._rpc(
+                "operations/stat",
+                {"fs": self.fs, "remote": name, "opt": {"recurse": False, "noModTime": True, "noMimeType": True}},
+            )
             item = result["item"]
         except ObjectNotFound:
             item = None
@@ -235,43 +222,28 @@ class Rclone(BackendBase):
                 headers["Range"] = f"bytes={offset}-{offset+size-1}"
             else:
                 headers["Range"] = f"bytes={offset}-"
-        r = self._requests(
-            requests.get,
-            f"{self.url}[{self.fs}]/{name}",
-            headers=headers,
-        )
+        r = self._requests(requests.get, f"{self.url}[{self.fs}]/{name}", headers=headers)
         return r.content
 
     def store(self, name: str, value: bytes) -> None:
         """store <value> into <name>"""
         validate_name(name)
-        files = {
-            'file': (os.path.basename(name), value, 'application/octet-stream')
-        }
-        params = {
-            "fs": self.fs,
-            "remote": os.path.dirname(name),
-        }
+        files = {"file": (os.path.basename(name), value, "application/octet-stream")}
+        params = {"fs": self.fs, "remote": os.path.dirname(name)}
         self._rpc("operations/uploadfile", None, params=params, files=files)
 
     def delete(self, name: str) -> None:
         """delete <name>"""
         validate_name(name)
-        self._rpc("operations/deletefile", {
-            "fs": self.fs,
-            "remote": name,
-        })
+        self._rpc("operations/deletefile", {"fs": self.fs, "remote": name})
 
     def move(self, curr_name: str, new_name: str) -> None:
         """rename curr_name to new_name (overwrite target)"""
         validate_name(curr_name)
         validate_name(new_name)
-        self._rpc("operations/movefile", {
-            "srcFs": self.fs,
-            "srcRemote": curr_name,
-            "dstFs": self.fs,
-            "dstRemote": new_name,
-        })
+        self._rpc(
+            "operations/movefile", {"srcFs": self.fs, "srcRemote": curr_name, "dstFs": self.fs, "dstRemote": new_name}
+        )
 
     def list(self, name: str) -> Iterator[ItemInfo]:
         """list the contents of <name>, non-recursively.
@@ -282,15 +254,10 @@ class Rclone(BackendBase):
         The yielded ItemInfos are sorted alphabetically by name.
         """
         validate_name(name)
-        result = self._rpc("operations/list", {
-            "fs": self.fs,
-            "remote": name,
-            "opt": {
-                "recurse": False,
-                "noModTime": True,
-                "noMimeType": True,
-            },
-        })
+        result = self._rpc(
+            "operations/list",
+            {"fs": self.fs, "remote": name, "opt": {"recurse": False, "noModTime": True, "noMimeType": True}},
+        )
         for item in result["list"]:
             name = item["Name"]
             if name.endswith(TMP_SUFFIX):

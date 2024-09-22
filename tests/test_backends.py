@@ -53,6 +53,7 @@ def check_sftp_available():
         be.destroy()
         return True
 
+
 def _get_rclone_backend():
     # To use a specific RCLONE backend
     # export BORGSTORE_TEST_RCLONE_URL="rclone://remote:path"
@@ -91,6 +92,7 @@ def sftp_backend_created():
         yield be
     finally:
         be.destroy()
+
 
 @pytest.fixture(scope="function")
 def rclone_backend_created():
