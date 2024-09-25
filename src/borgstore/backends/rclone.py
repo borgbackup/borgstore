@@ -112,7 +112,7 @@ class Rclone(BackendBase):
                 if not line:
                     break  # Process has finished
 
-        thread = threading.Thread(target=discard)
+        thread = threading.Thread(target=discard, daemon=True)
         thread.start()
 
     def close(self):
