@@ -66,6 +66,7 @@ class Rclone(BackendBase):
     """
 
     HOST = "localhost"
+    TRIES = 3                   # try failed load/store operations this many times
 
     def __init__(self, path, *, do_fsync=False):
         if not path.endswith(":") and not path.endswith("/"):
@@ -125,22 +126,32 @@ class Rclone(BackendBase):
         self.process = None
         self.url = None
 
-    def _requests(self, fn, *args, **kwargs):
+    def _requests(self, fn, *args, tries=1, **kwargs):
         """
         Runs a call to the requests function fn with *args and **kwargs
 
         It adds auth and decodes errors in a consistent way
 
         It returns the response object
+
+        This will retry any 500 errors received from rclone tries times as these
+        correspond to backend or protocol or Internet errors.
+
+        Note that rclone will retry all operations internally except those which
+        stream data.
         """
         if not self.process or not self.url:
             raise BackendMustBeOpen()
-        r = fn(*args, auth=(self.user, self.password), **kwargs)
-        if r.status_code == 404:
-            raise ObjectNotFound(f"Not Found: error {r.status_code}: {r.text}")
-        elif r.status_code not in (200, 206):
-            raise BackendError(f"rclone rc command failed: error {r.status_code}: {r.text}")
-        return r
+        for try_number in range(tries):
+            r = fn(*args, auth=(self.user, self.password), **kwargs)
+            if r.status_code in (200, 206):
+                return r
+            elif r.status_code == 404:
+                raise ObjectNotFound(f"Not Found: error {r.status_code}: {r.text}")
+            err = BackendError(f"rclone rc command failed: error {r.status_code}: {r.text}")
+            if r.status_code != 500:
+                break
+        raise err
 
     def _rpc(self, command, json_input, **kwargs):
         """
@@ -222,7 +233,7 @@ class Rclone(BackendBase):
                 headers["Range"] = f"bytes={offset}-{offset+size-1}"
             else:
                 headers["Range"] = f"bytes={offset}-"
-        r = self._requests(requests.get, f"{self.url}[{self.fs}]/{name}", headers=headers)
+        r = self._requests(requests.get, f"{self.url}[{self.fs}]/{name}", tries=self.TRIES, headers=headers)
         return r.content
 
     def store(self, name: str, value: bytes) -> None:
@@ -230,7 +241,7 @@ class Rclone(BackendBase):
         validate_name(name)
         files = {"file": (os.path.basename(name), value, "application/octet-stream")}
         params = {"fs": self.fs, "remote": os.path.dirname(name)}
-        self._rpc("operations/uploadfile", None, params=params, files=files)
+        self._rpc("operations/uploadfile", None, tries=self.TRIES, params=params, files=files)
 
     def delete(self, name: str) -> None:
         """delete <name>"""
