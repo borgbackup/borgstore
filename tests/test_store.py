@@ -1,105 +1,131 @@
 """
 Testing for high-level Store API.
-
-For simplicity, a lot of tests do not use namespaces if they do not require more than one.
-While this works for these tests, this is not recommended for production!
 """
 
 import pytest
 
-from . import key, list_store_names, list_store_names, list_store_names_sorted
-from .test_backends import posixfs_backend_created  # noqa
-from .test_backends import sftp_backend_created, sftp_is_available  # noqa
-from .test_backends import rclone_backend_created, rclone_is_available  # noqa
+from . import key, list_store_names, list_store_names_sorted
+from .test_backends import get_posixfs_test_backend  # noqa
+from .test_backends import get_sftp_test_backend, sftp_is_available  # noqa
+from .test_backends import get_rclone_test_backend, rclone_is_available  # noqa
 
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo
 
+LEVELS_CONFIG = {"zero/": [0], "one/": [1], "two/": [2]}  # this is the layout we use for most tests
 
-def test_basics(posixfs_backend_created):
-    k0, v0 = key(0), b"value0"
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [2]}) as store:
+
+@pytest.fixture()
+def posixfs_store_created(tmp_path):
+    store = Store(backend=get_posixfs_test_backend(tmp_path), levels=LEVELS_CONFIG)
+    store.create()
+    try:
+        yield store
+    finally:
+        store.destroy()
+
+
+@pytest.fixture()
+def sftp_store_created():
+    store = Store(backend=get_sftp_test_backend(), levels=LEVELS_CONFIG)
+    store.create()
+    try:
+        yield store
+    finally:
+        store.destroy()
+
+
+@pytest.fixture()
+def rclone_store_created():
+    store = Store(backend=get_rclone_test_backend(), levels=LEVELS_CONFIG)
+    store.create()
+    try:
+        yield store
+    finally:
+        store.destroy()
+
+
+def test_basics(posixfs_store_created):
+    ns = "two"
+    k0 = key(0)
+    v0 = b"value0"
+    nsk0 = ns + "/" + k0
+    with posixfs_store_created as store:
         # roundtrip
-        store.store(k0, v0)
-        assert store.load(k0) == v0
+        store.store(nsk0, v0)
+        assert store.load(nsk0) == v0
 
         # check on higher level: store (automatic nesting)
-        assert store.info(k0).exists
-        assert not store.info(k0).directory
-        assert store.info(k0).size == len(v0)
+        assert store.info(nsk0).exists
+        assert not store.info(nsk0).directory
+        assert store.info(nsk0).size == len(v0)
         # check on lower level: backend (no automatic nesting)
-        assert store.backend.info("00").exists
-        assert store.backend.info("00").directory
-        assert store.backend.info("00/00").exists
-        assert store.backend.info("00/00").directory
-        assert store.backend.info("00/00/00000000").exists
-        assert store.backend.info("00/00/00000000").size == len(v0)
-        assert not store.backend.info("00/00/00000000").directory
+        assert store.backend.info("two/00").exists
+        assert store.backend.info("two/00").directory
+        assert store.backend.info("two/00/00").exists
+        assert store.backend.info("two/00/00").directory
+        assert store.backend.info("two/00/00/00000000").exists
+        assert store.backend.info("two/00/00/00000000").size == len(v0)
+        assert not store.backend.info("two/00/00/00000000").directory
 
-        assert list(store.list(ROOTNS)) == [ItemInfo(name=k0, exists=True, size=len(v0), directory=False)]
+        assert list(store.list(ns)) == [ItemInfo(name=k0, exists=True, size=len(v0), directory=False)]
 
-        store.delete(k0)
+        store.delete(nsk0)
 
         # check on higher level: store (automatic nesting)
-        assert not store.info(k0).exists
+        assert not store.info(nsk0).exists
         # check on lower level: backend (no automatic nesting)
-        assert not store.backend.info("00/00/00000000").exists
+        assert not store.backend.info("two/00/00/00000000").exists
 
-        assert list(store.list(ROOTNS)) == []
+        assert list(store.list(ns)) == []
 
 
-@pytest.mark.parametrize(
-    "levels,count",
-    [
-        ({ROOTNS: [0]}, 100),
-        ({ROOTNS: [1]}, 1000),
-        # ({ROOTNS: [2]}, 100000),  # takes rather long
-    ],
-)
-def test_scalability_count(posixfs_backend_created, levels, count):
-    with Store(backend=posixfs_backend_created, levels=levels) as store:
+@pytest.mark.parametrize("namespace,count", [("zero", 100), ("one", 1000)])
+def test_scalability_count(posixfs_store_created, namespace, count):
+    with posixfs_store_created as store:
         keys = [key(i) for i in range(count)]
         for k in keys:
-            store.store(k, b"")
-        assert list_store_names(store, ROOTNS) == keys
+            store.store(namespace + "/" + k, b"")
+        assert list_store_names(store, namespace) == keys
 
 
 @pytest.mark.skipif(not sftp_is_available, reason="SFTP is not available")
-def test_scalability_big_values(sftp_backend_created):
-    levels = {ROOTNS: [0]}
+def test_scalability_big_values_sftp(sftp_store_created):
     count = 10
+    ns = "zero"
     value = b"x" * 2**20
-    with Store(backend=sftp_backend_created, levels=levels) as store:
+    with sftp_store_created as store:
         keys = [key(i) for i in range(count)]
         for k in keys:
-            store.store(k, value)
+            store.store(ns + "/" + k, value)
         for k in keys:
-            assert store.load(k) == value
-        assert list_store_names(store, ROOTNS) == keys
+            assert store.load(ns + "/" + k) == value
+        assert list_store_names(store, ns) == keys
 
 
 @pytest.mark.skipif(not rclone_is_available, reason="rclone is not available")
-def test_scalability_big_values_rclone(rclone_backend_created):
-    levels = {ROOTNS: [0]}
+def test_scalability_big_values_rclone(rclone_store_created):
     count = 10
+    ns = "zero"
     value = b"x" * 2**20
-    with Store(backend=rclone_backend_created, levels=levels) as store:
+    with rclone_store_created as store:
         keys = [key(i) for i in range(count)]
         for k in keys:
-            store.store(k, value)
+            store.store(ns + "/" + k, value)
         for k in keys:
-            assert store.load(k) == value
-        assert list_store_names(store, ROOTNS) == keys
+            assert store.load(ns + "/" + k) == value
+        assert list_store_names(store, ns) == keys
 
 
-def test_upgrade_levels(posixfs_backend_created):
+def test_upgrade_levels(posixfs_store_created):
     k0, v0 = key(0), b"value0"
     ii0 = ItemInfo(k0, True, len(v0), False)
     k1, v1 = key(1), b"value1"
     ii1 = ItemInfo(k1, True, len(v0), False)
 
     # start using the backend storage with nesting level 0:
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [0]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [0]})
+    with posixfs_store_created as store:
         # store k0 on level 0:
         store.store(k0, v0)
         assert store.find(k0) == "" + k0  # found on level 0
@@ -107,7 +133,8 @@ def test_upgrade_levels(posixfs_backend_created):
         assert list_store_names(store, ROOTNS) == [k0]
 
     # now upgrade to nesting level 1 (while keeping support for level 0), using the same backend storage:
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [0, 1]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [0, 1]})
+    with posixfs_store_created as store:
         # does k0 still work?
         assert store.find(k0) == "" + k0  # found on level 0
         assert store.info(k0) == ii0
@@ -130,14 +157,15 @@ def test_upgrade_levels(posixfs_backend_created):
         assert store.load(k0) == v0new
 
 
-def test_downgrade_levels(posixfs_backend_created):
+def test_downgrade_levels(posixfs_store_created):
     k0, v0 = key(0), b"value0"
     ii0 = ItemInfo(k0, True, len(v0), False)
     k1, v1 = key(1), b"value1"
     ii1 = ItemInfo(k1, True, len(v0), False)
 
     # start using the backend storage with nesting level 1:
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [1]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [1]})
+    with posixfs_store_created as store:
         # store k1 on level 1:
         store.store(k1, v1)
         assert store.find(k1) == "00/" + k1  # found on level 1
@@ -145,7 +173,8 @@ def test_downgrade_levels(posixfs_backend_created):
         assert list_store_names(store, ROOTNS) == [k1]
 
     # now downgrade to nesting level 0 (while keeping support for level 1), using the same backend storage:
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [1, 0]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [1, 0]})
+    with posixfs_store_created as store:
         # does k1 still work?
         assert store.find(k1) == "00/" + k1  # found on level 1
         assert store.info(k1) == ii1
@@ -168,105 +197,95 @@ def test_downgrade_levels(posixfs_backend_created):
         assert store.load(k1) == v1new
 
 
-def test_move_delete_undelete(posixfs_backend_created):
+def test_move_delete_undelete(posixfs_store_created):
+    ns = "zero"
     k0, v0 = key(0), b"value0"
+    nsk0 = ns + "/" + k0
     k1, v1 = key(1), b"value1"
-    with Store(backend=posixfs_backend_created) as store:
-        store.store(k0, v0)
-        store.store(k1, v1)
+    nsk1 = ns + "/" + k1
+    with posixfs_store_created as store:
+        store.store(nsk0, v0)
+        store.store(nsk1, v1)
         # delete
-        store.move(k0, delete=True)  # soft delete
-        assert list_store_names(store, ROOTNS, deleted=False) == [k1]
-        assert list_store_names(store, ROOTNS, deleted=True) == [k0, k1]
+        store.move(nsk0, delete=True)  # soft delete
+        assert list_store_names(store, ns, deleted=False) == [k1]
+        assert list_store_names(store, ns, deleted=True) == [k0, k1]
         # undelete
-        store.move(k0, undelete=True)  # undelete previously soft deleted item
-        assert list_store_names(store, ROOTNS, deleted=False) == [k0, k1]
-        assert list_store_names(store, ROOTNS, deleted=True) == [k0, k1]
+        store.move(nsk0, undelete=True)  # undelete previously soft deleted item
+        assert list_store_names(store, ns, deleted=False) == [k0, k1]
+        assert list_store_names(store, ns, deleted=True) == [k0, k1]
 
 
-def test_move_change_level(posixfs_backend_created):
+def test_move_change_level(posixfs_store_created):
     k0, v0 = key(0), b"value0"
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [0]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [0]})
+    with posixfs_store_created as store:
         store.store(k0, v0)  # store on level 0
         assert store.find(k0) == "" + k0  # now on level 0
-    with Store(backend=posixfs_backend_created, levels={ROOTNS: [0, 1]}) as store:
+    posixfs_store_created.set_levels({ROOTNS: [0, 1]})
+    with posixfs_store_created as store:
         store.move(k0, change_level=True)
         assert store.find(k0) == "00/" + k0  # now on level 1
 
 
-def test_move_generic(posixfs_backend_created):
+def test_move_generic(posixfs_store_created):
     # rename, stay in same namespace/directory
-    k_curr, k_new, value = "ns/aaa", "ns/bbb", b"value"
-    with Store(backend=posixfs_backend_created) as store:
+    k_curr, k_new, value = "zero/aaa", "zero/bbb", b"value"
+    with posixfs_store_created as store:
         store.store(k_curr, value)
         store.move(k_curr, k_new)
         assert store.load(k_new) == value
     # move, change namespace/directory
-    k_curr, k_new, value = "ns_curr/key", "ns_new/key", b"value"
-    with Store(backend=posixfs_backend_created) as store:
+    k_curr, k_new, value = "one/00000000", "two/00000000", b"value"
+    with posixfs_store_created as store:
         store.store(k_curr, value)
         store.move(k_curr, k_new)
         assert store.load(k_new) == value
 
 
-def test_nesting_config(posixfs_backend_created):
+def test_nesting_config(posixfs_store_created):
     empty = b""
-    levels_config = {
-        ROOTNS: [0],
-        "flat/": [0],
-        "nested_one/": [1],
-        "nested_two/": [2],
-    }  # trailing slashes are important
-    with Store(backend=posixfs_backend_created, levels=levels_config) as store:
-        store.store("toplevel", empty)
-        store.store("flat/something", empty)
-        store.store("nested_one/0000", empty)
-        store.store("nested_two/00000000", empty)
-        assert store.find("toplevel") == "toplevel"
-        assert store.find("flat/something") == "flat/something"
-        assert store.find("nested_one/something") == "nested_one/so/something"
-        assert store.find("nested_two/something") == "nested_two/so/me/something"
-        # we do not have a levels_config entry for this, default is no nesting:
-        assert store.find("no_config/something") == "no_config/something"
+    with posixfs_store_created as store:
+        store.store("zero/something", empty)
+        store.store("one/1234", empty)
+        store.store("two/12345678", empty)
+        assert store.find("zero/something") == "zero/something"
+        assert store.find("one/1234") == "one/12/1234"
+        assert store.find("two/12345678") == "two/12/34/12345678"
 
 
-def test_load_partial(posixfs_backend_created):
-    with Store(backend=posixfs_backend_created) as store:
-        store.store("key", b"0123456789")
-        assert store.load("key") == b"0123456789"
-        assert store.load("key", size=3) == b"012"
-        assert store.load("key", offset=5) == b"56789"
-        assert store.load("key", offset=4, size=4) == b"4567"
+def test_load_partial(posixfs_store_created):
+    key = "zero/key"
+    with posixfs_store_created as store:
+        store.store(key, b"0123456789")
+        assert store.load(key) == b"0123456789"
+        assert store.load(key, size=3) == b"012"
+        assert store.load(key, offset=5) == b"56789"
+        assert store.load(key, offset=4, size=4) == b"4567"
 
 
-def test_list_is_sorted(posixfs_backend_created):
+def test_list_is_sorted(posixfs_store_created):
     # the flat list we get from backend.list is sorted.
     # if all items are on the same level, this implies that store.list is also sorted,
     # although it does no own sorting.
     empty = b""
     unsorted_keys = "0012", "0000", "9999", "9988", "5566", "6655", "3322", "3300"
     sorted_keys = sorted(unsorted_keys)
-    levels_config = {
-        ROOTNS: [0],
-        "flat/": [0],
-        "nested_one/": [1],
-        "nested_two/": [2],
-    }  # trailing slashes are important
-    with Store(backend=posixfs_backend_created, levels=levels_config) as store:
+    with posixfs_store_created as store:
         for key in unsorted_keys:
-            store.store(f"flat/{key}", empty)
-        assert list_store_names(store, "flat") == sorted_keys
+            store.store(f"zero/{key}", empty)
+        assert list_store_names(store, "zero") == sorted_keys
         for key in unsorted_keys:
-            store.store(f"nested_one/{key}", empty)
-        assert list_store_names(store, "nested_one") == sorted_keys
+            store.store(f"one/{key}", empty)
+        assert list_store_names(store, "one") == sorted_keys
         for key in unsorted_keys:
-            store.store(f"nested_two/{key}", empty)
-        assert list_store_names(store, "nested_two") == sorted_keys
+            store.store(f"two/{key}", empty)
+        assert list_store_names(store, "two") == sorted_keys
 
 
-def test_stats(posixfs_backend_created):
-    with Store(backend=posixfs_backend_created) as store:
-        key, value = "key", b""
+def test_stats(posixfs_store_created):
+    with posixfs_store_created as store:
+        ns, key, value = "zero", "zero/key", b""
         assert store._stats == {}
         # calls
         store.store(key, value)
@@ -276,7 +295,7 @@ def test_stats(posixfs_backend_created):
         store.load(key)
         assert store._stats["load_calls"] == 1
         assert store._stats["store_calls"] == 2
-        list(store.list(ROOTNS))
+        list(store.list(ns))
         assert store._stats["list_calls"] == 1
         # timings (in ns, thus > 0 in any case)
         assert store._stats["list_time"] > 0

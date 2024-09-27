@@ -24,9 +24,13 @@ from borgstore.backends.rclone import Rclone, get_rclone_backend
 from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
+def get_posixfs_test_backend(tmp_path):
+    return PosixFS(tmp_path / "store")
+
+
 @pytest.fixture()
 def posixfs_backend_created(tmp_path):
-    be = PosixFS(tmp_path / "store")
+    be = get_posixfs_test_backend(tmp_path)
     be.create()
     try:
         yield be
@@ -34,7 +38,7 @@ def posixfs_backend_created(tmp_path):
         be.destroy()
 
 
-def _get_sftp_backend():
+def get_sftp_test_backend():
     # export BORGSTORE_TEST_SFTP_URL="sftp://user@host:port/home/user/borgstore/temp-store"
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't.
     url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
@@ -45,7 +49,7 @@ def _get_sftp_backend():
 def check_sftp_available():
     """in some test environments, get_sftp_backend() does not result in a working sftp backend"""
     try:
-        be = _get_sftp_backend()
+        be = get_sftp_test_backend()
         be.create()  # first sftp activity happens here
     except Exception:
         return False  # use "raise" here for debugging sftp store issues
@@ -54,7 +58,7 @@ def check_sftp_available():
         return True
 
 
-def _get_rclone_backend():
+def get_rclone_test_backend():
     # To use a specific RCLONE backend
     # export BORGSTORE_TEST_RCLONE_URL="rclone://remote:path"
     # otherwise this will run an rclone backend in a temporary directory on local disk
@@ -70,7 +74,7 @@ def _get_rclone_backend():
 def check_rclone_available():
     """in some test environments, get_rclone_backend() does not result in a working rclone backend"""
     try:
-        be = _get_rclone_backend()
+        be = get_rclone_test_backend()
         be.create()  # first rclone activity happens here
     except Exception as e:
         print(f"Rclone backend create failed {repr(e)}")
@@ -86,7 +90,7 @@ rclone_is_available = check_rclone_available()
 
 @pytest.fixture(scope="function")
 def sftp_backend_created():
-    be = _get_sftp_backend()
+    be = get_sftp_test_backend()
     be.create()
     try:
         yield be
@@ -96,7 +100,7 @@ def sftp_backend_created():
 
 @pytest.fixture(scope="function")
 def rclone_backend_created():
-    be = _get_rclone_backend()
+    be = get_rclone_test_backend()
     be.create()
     try:
         yield be

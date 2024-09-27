@@ -43,8 +43,7 @@ class Store:
     def __init__(self, url: Optional[str] = None, backend: Optional[BackendBase] = None, levels: Optional[dict] = None):
         self.url = url
         levels = levels if levels else {}
-        # we accept levels as a dict, but we rather want a list of (namespace, levels) tuples, longest namespace first:
-        self.levels = [entry for entry in sorted(levels.items(), key=lambda item: len(item[0]), reverse=True)]
+        self.set_levels(levels)
         if backend is None and url is not None:
             backend = get_backend(url)
             if backend is None:
@@ -60,6 +59,10 @@ class Store:
 
     def __repr__(self):
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
+
+    def set_levels(self, levels: dict) -> None:
+        # we accept levels as a dict, but we rather want a list of (namespace, levels) tuples, longest namespace first:
+        self.levels = [entry for entry in sorted(levels.items(), key=lambda item: len(item[0]), reverse=True)]
 
     def create(self) -> None:
         self.backend.create()
