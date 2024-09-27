@@ -154,8 +154,10 @@ class Sftp(BackendBase):
                     pass
         try:
             self.client.mkdir(str(p))
+        except FileNotFoundError:
+            raise  # parents == False and the parent dir is missing.
         except OSError:
-            # maybe already existed?
+            # maybe p already existed?
             if not exist_ok:
                 raise
 
