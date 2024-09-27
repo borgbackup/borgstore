@@ -169,9 +169,11 @@ class Rclone(BackendBase):
         if self.process:
             raise BackendMustNotBeOpen()
         with self:
-            info = self.info("")
-            if info.exists:
-                raise BackendAlreadyExists(f"rclone storage base path already exists: {self.fs}")
+            try:
+                if any(self.list("")):
+                    raise BackendAlreadyExists(f"rclone storage base path exists and isn't empty: {self.fs}")
+            except ObjectNotFound:
+                pass
             self.mkdir("")
 
     def destroy(self):
