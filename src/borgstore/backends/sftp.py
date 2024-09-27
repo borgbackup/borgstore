@@ -11,7 +11,8 @@ from typing import Optional
 import paramiko
 
 from ._base import BackendBase, ItemInfo, validate_name
-from .errors import BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists, ObjectNotFound
+from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
+from .errors import ObjectNotFound
 from ..constants import TMP_SUFFIX
 
 
@@ -91,9 +92,16 @@ class Sftp(BackendBase):
             raise BackendMustNotBeOpen()
         self._connect()
         try:
-            self._mkdir(self.base_path, parents=False, exist_ok=False)
-        except (FileExistsError, IOError):
-            raise BackendAlreadyExists(f"sftp storage base path already exists: {self.base_path}")
+            try:
+                # we accept an already existing directory, but we do not create parent dirs:
+                self._mkdir(self.base_path, exist_ok=True, parents=False)
+            except FileNotFoundError:
+                raise BackendError(f"sftp storage base path's parent directory does not exist: {self.base_path}")
+            contents = list(self.client.listdir(self.base_path))
+            if contents:
+                raise BackendAlreadyExists(f"sftp storage base path is not empty: {self.base_path}")
+        except IOError as err:
+            raise BackendError(f"sftp storage I/O error: {err}")
         finally:
             self._disconnect()
 

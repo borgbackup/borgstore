@@ -324,6 +324,9 @@ def test_load_partial(tested_backends, request):
 
 def test_already_exists(tested_backends, request):
     backend = get_backend_from_fixture(tested_backends, request)
+    with backend as _backend:
+        _backend.store("key", b"value")  # make the backend "not empty"
+    # the backend must reject (re-)creation if there is already something at that place:
     with pytest.raises(BackendAlreadyExists):
         backend.create()
 

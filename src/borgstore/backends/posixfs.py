@@ -10,7 +10,8 @@ import stat
 import tempfile
 
 from ._base import BackendBase, ItemInfo, validate_name
-from .errors import BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen, ObjectNotFound
+from .errors import BackendError, BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen
+from .errors import ObjectNotFound
 from ..constants import TMP_SUFFIX
 
 
@@ -37,9 +38,13 @@ class PosixFS(BackendBase):
         if self.opened:
             raise BackendMustNotBeOpen()
         try:
-            self.base_path.mkdir()
-        except FileExistsError:
-            raise BackendAlreadyExists(f"posixfs storage base path already exists: {self.base_path}")
+            # we accept an already existing directory, but we do not create parent dirs:
+            self.base_path.mkdir(exist_ok=True, parents=False)
+        except FileNotFoundError:
+            raise BackendError(f"posixfs storage base path's parent directory does not exist: {self.base_path}")
+        contents = list(self.base_path.iterdir())
+        if contents:
+            raise BackendAlreadyExists(f"posixfs storage base path is not empty: {self.base_path}")
 
     def destroy(self):
         if self.opened:
