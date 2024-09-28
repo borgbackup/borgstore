@@ -124,7 +124,7 @@ def test_upgrade_levels(posixfs_store_created):
     ii1 = ItemInfo(k1, True, len(v0), False)
 
     # start using the backend storage with nesting level 0:
-    posixfs_store_created.set_levels({ROOTNS: [0]})
+    posixfs_store_created.set_levels({ROOTNS: [0]}, create=True)
     with posixfs_store_created as store:
         # store k0 on level 0:
         store.store(k0, v0)
@@ -133,7 +133,7 @@ def test_upgrade_levels(posixfs_store_created):
         assert list_store_names(store, ROOTNS) == [k0]
 
     # now upgrade to nesting level 1 (while keeping support for level 0), using the same backend storage:
-    posixfs_store_created.set_levels({ROOTNS: [0, 1]})
+    posixfs_store_created.set_levels({ROOTNS: [0, 1]}, create=True)
     with posixfs_store_created as store:
         # does k0 still work?
         assert store.find(k0) == "" + k0  # found on level 0
@@ -164,7 +164,7 @@ def test_downgrade_levels(posixfs_store_created):
     ii1 = ItemInfo(k1, True, len(v0), False)
 
     # start using the backend storage with nesting level 1:
-    posixfs_store_created.set_levels({ROOTNS: [1]})
+    posixfs_store_created.set_levels({ROOTNS: [1]}, create=True)
     with posixfs_store_created as store:
         # store k1 on level 1:
         store.store(k1, v1)
@@ -173,7 +173,7 @@ def test_downgrade_levels(posixfs_store_created):
         assert list_store_names(store, ROOTNS) == [k1]
 
     # now downgrade to nesting level 0 (while keeping support for level 1), using the same backend storage:
-    posixfs_store_created.set_levels({ROOTNS: [1, 0]})
+    posixfs_store_created.set_levels({ROOTNS: [1, 0]}, create=True)
     with posixfs_store_created as store:
         # does k1 still work?
         assert store.find(k1) == "00/" + k1  # found on level 1
@@ -218,11 +218,11 @@ def test_move_delete_undelete(posixfs_store_created):
 
 def test_move_change_level(posixfs_store_created):
     k0, v0 = key(0), b"value0"
-    posixfs_store_created.set_levels({ROOTNS: [0]})
+    posixfs_store_created.set_levels({ROOTNS: [0]}, create=True)
     with posixfs_store_created as store:
         store.store(k0, v0)  # store on level 0
         assert store.find(k0) == "" + k0  # now on level 0
-    posixfs_store_created.set_levels({ROOTNS: [0, 1]})
+    posixfs_store_created.set_levels({ROOTNS: [0, 1]}, create=True)
     with posixfs_store_created as store:
         store.move(k0, change_level=True)
         assert store.find(k0) == "00/" + k0  # now on level 1
