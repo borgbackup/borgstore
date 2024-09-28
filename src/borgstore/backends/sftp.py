@@ -214,7 +214,7 @@ class Sftp(BackendBase):
             raise BackendMustBeOpen()
         validate_name(name)
         tmp_dir = Path(name).parent
-        self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
+        # note: tmp_dir already exists, it was pre-created by Store.create_levels.
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         tmp_name = str(tmp_dir / ("".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8)) + TMP_SUFFIX))
@@ -242,12 +242,7 @@ class Sftp(BackendBase):
             raise BackendMustBeOpen()
         validate_name(curr_name)
         validate_name(new_name)
-        try:
-            parent_dir = Path(new_name).parent
-            self._mkdir(str(parent_dir), parents=True, exist_ok=True)
-        except OSError:
-            # exists already?
-            pass
+        # note: the parent dir of new_name already exists, it was pre-created by Store.create_levels.
         try:
             self.client.posix_rename(curr_name, new_name)
         except FileNotFoundError:

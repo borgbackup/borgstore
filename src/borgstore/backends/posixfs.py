@@ -124,7 +124,7 @@ class PosixFS(BackendBase):
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         tmp_dir = path.parent
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        # note: tmp_dir already exists, it was pre-created by Store.create_levels.
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
@@ -155,7 +155,7 @@ class PosixFS(BackendBase):
         curr_path = self._validate_join(curr_name)
         new_path = self._validate_join(new_name)
         try:
-            new_path.parent.mkdir(parents=True, exist_ok=True)
+            # note: new_path.parent dir already exists, it was pre-created by Store.create_levels.
             curr_path.replace(new_path)
         except FileNotFoundError:
             raise ObjectNotFound(curr_name) from None
