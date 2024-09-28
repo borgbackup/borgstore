@@ -130,7 +130,10 @@ class Sftp(BackendBase):
         if self.opened:
             raise BackendMustNotBeOpen()
         self._connect()
-        st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
+        try:
+            st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
+        except FileNotFoundError:
+            raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}") from None
         if not stat.S_ISDIR(st.st_mode):
             raise BackendDoesNotExist(f"sftp storage base path is not a directory: {self.base_path}")
         self.client.chdir(self.base_path)  # this sets the cwd we work in!
