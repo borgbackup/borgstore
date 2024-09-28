@@ -1,8 +1,7 @@
 BorgStore
 =========
 
-A key/value store implementation in Python, supporting multiple backends,
-data redundancy and distribution.
+A key/value store implementation in Python, supporting multiple backends.
 
 Keys
 ----
@@ -102,15 +101,6 @@ Currently, these storage backends are implemented:
 - SFTP (access a server via sftp, namespaces: directories, values: in key-named files)
 - Rclone - access any of the 100s of cloud providers [rclone](https://rclone.org/) supports
 - (more might come in future)
-
-MStore
-------
-
-API of MStore is very similar to Store, but instead of directly using one backend
-only (like Store does), it uses multiple Stores internally to implement:
-
-- redundancy (keep same data at multiple places)
-- distribution (keep different data at multiple places)
 
 Scalability
 -----------
