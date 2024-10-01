@@ -99,7 +99,7 @@ Currently, these storage backends are implemented:
 
 - POSIX filesystems (namespaces: directories, values: in key-named files)
 - SFTP (access a server via sftp, namespaces: directories, values: in key-named files)
-- Rclone - access any of the 100s of cloud providers [rclone](https://rclone.org/) supports
+- Rclone - access any of the 100s of cloud providers `rclone <https://rclone.org/>`_ supports
 - (more might come in future)
 
 Scalability
