@@ -128,16 +128,16 @@ State of this project
 
 **API is still unstable and expected to change as development goes on.**
 
-**There will be no data migration tools involving development/testing releases,
-like e.g. upgrading a store from alpha1 to alpha2 or beta13 to release.**
+**As long as the API is unstable, there will be no data migration tools,
+like e.g. for upgrading an existing store's data to a new release.**
 
 There are tests and they succeed for the basic functionality, so some of the
 stuff is already working well.
 
 There might be missing features or optimization potential, feedback welcome!
 
-There are a lot of possible, but still missing backends (like e.g. for cloud
-storage). If you want to create and support one: pull requests are welcome.
+There are a lot of possible, but still missing backends. If you want to create
+and support one: pull requests are welcome.
 
 Borg?
 -----
