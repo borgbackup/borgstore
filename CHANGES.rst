@@ -1,6 +1,31 @@
 ChangeLog
 =========
 
+Version 0.0.5 2024-10-01
+------------------------
+
+Fixes:
+
+- backend.create: only reject non-empty storage, #57
+- backends.sftp: fix _mkdir edge case
+- backends.sftp: raise BackendDoesNotExist if base path is not found
+
+- rclone backend:
+
+  - don't error on create if source directory is empty, #57
+  - fix hang on termination, #54
+
+New features:
+
+- rclone backend: retry errors on load and store 3 times
+
+Other changes:
+
+- remove MStore for now, see commit 6a6fb334.
+- refactor Store tests, add Store.set_levels method
+- move types-requests to tox.ini, only needed for development
+
+
 Version 0.0.4 2024-09-22
 ------------------------
 
