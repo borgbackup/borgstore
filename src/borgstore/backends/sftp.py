@@ -8,7 +8,10 @@ import re
 import stat
 from typing import Optional
 
-import paramiko
+try:
+    import paramiko
+except ImportError:
+    paramiko = None
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
@@ -25,9 +28,10 @@ def get_sftp_backend(url):
         (?P<hostname>([^:/]+))(?::(?P<port>\d+))?
         (?P<path>(/.*))
     """
-    m = re.match(sftp_regex, url, re.VERBOSE)
-    if m:
-        return Sftp(username=m["username"], hostname=m["hostname"], port=int(m["port"] or "0"), path=m["path"])
+    if paramiko is not None:
+        m = re.match(sftp_regex, url, re.VERBOSE)
+        if m:
+            return Sftp(username=m["username"], hostname=m["hostname"], port=int(m["port"] or "0"), path=m["path"])
 
 
 class Sftp(BackendBase):
@@ -37,6 +41,8 @@ class Sftp(BackendBase):
         self.port = port
         self.base_path = path
         self.opened = False
+        if paramiko is None:
+            raise BackendError("sftp backend unavailable: could not import paramiko!")
 
     def _get_host_config_from_file(self, path: str, hostname: str):
         """lookup the configuration for hostname in path (ssh config file)"""
