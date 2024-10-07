@@ -23,8 +23,12 @@ classifiers = [
 license = {text="BSD"}
 requires-python = ">=3.9"
 dependencies = [
-    "paramiko >= 1.9.1",  # 1.9.1+ supports multiple IdentityKey entries in .ssh/config
     "requests >= 2.25.1",
+]
+
+[project.optional-dependencies]
+sftp = [
+    "paramiko >= 1.9.1",  # 1.9.1+ supports multiple IdentityKey entries in .ssh/config
 ]
 
 [project.urls]

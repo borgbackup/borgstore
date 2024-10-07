@@ -137,6 +137,7 @@ def test_file_url(url, path):
     assert backend.base_path == Path(path).absolute()
 
 
+@pytest.mark.skipif(not sftp_is_available, reason="SFTP is not available")
 @pytest.mark.parametrize(
     "url,username,hostname,port,path",
     [
