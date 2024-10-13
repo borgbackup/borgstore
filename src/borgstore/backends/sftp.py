@@ -20,13 +20,18 @@ from ..constants import TMP_SUFFIX
 
 
 def get_sftp_backend(url):
-    # sftp://username@hostname:22/var/backups/borgstore/second
-    # note: username and port optional, host must be a hostname (not IP), must give path
+    # sftp://username@hostname:22/path
+    # note:
+    # - username and port optional
+    # - host must be a hostname (not IP)
+    # - must give a path, default is a relative path (usually relative to user's home dir -
+    #   this is so that the sftp server admin can move stuff around without the user needing to know).
+    # - giving an absolute path is also possible: sftp://username@hostname:22//home/username/borgstore
     sftp_regex = r"""
         sftp://
         ((?P<username>[^@]+)@)?
-        (?P<hostname>([^:/]+))(?::(?P<port>\d+))?
-        (?P<path>(/.*))
+        (?P<hostname>([^:/]+))(?::(?P<port>\d+))?/  # slash as separator, not part of the path
+        (?P<path>(.+))  # path may or may not start with a slash, must not be empty
     """
     if paramiko is not None:
         m = re.match(sftp_regex, url, re.VERBOSE)
