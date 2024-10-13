@@ -35,6 +35,11 @@ def get_file_backend(url):
 
 
 class PosixFS(BackendBase):
+    # PosixFS implementation supports precreate = True as well as = False,
+    # but be careful: if backend creation was with precreate_dirs = False,
+    # backend usage must not be with precreate_dirs = True.
+    precreate_dirs: bool = True
+
     def __init__(self, path, *, do_fsync=False):
         self.base_path = Path(path)
         if not self.base_path.is_absolute():
@@ -124,7 +129,9 @@ class PosixFS(BackendBase):
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         tmp_dir = path.parent
-        # note: tmp_dir already exists, it was pre-created by Store.create_levels.
+        if not self.precreate_dirs:
+            # note: tmp_dir already exists, if it was pre-created by Store.create_levels.
+            tmp_dir.mkdir(parents=True, exist_ok=True)
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
@@ -155,7 +162,9 @@ class PosixFS(BackendBase):
         curr_path = self._validate_join(curr_name)
         new_path = self._validate_join(new_name)
         try:
-            # note: new_path.parent dir already exists, it was pre-created by Store.create_levels.
+            if not self.precreate_dirs:
+                # note: new_path.parent dir already exists, if it was pre-created by Store.create_levels.
+                new_path.parent.mkdir(parents=True, exist_ok=True)
             curr_path.replace(new_path)
         except FileNotFoundError:
             raise ObjectNotFound(curr_name) from None

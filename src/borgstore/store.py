@@ -92,7 +92,8 @@ class Store:
 
     def create(self) -> None:
         self.backend.create()
-        self.create_levels()
+        if self.backend.precreate_dirs:
+            self.create_levels()
 
     def destroy(self) -> None:
         self.backend.destroy()
