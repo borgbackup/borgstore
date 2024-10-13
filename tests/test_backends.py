@@ -41,7 +41,9 @@ def posixfs_backend_created(tmp_path):
 
 
 def get_sftp_test_backend():
-    # export BORGSTORE_TEST_SFTP_URL="sftp://user@host:port/home/user/borgstore/temp-store"
+    # export BORGSTORE_TEST_SFTP_URL="sftp://user@host:port/borgstore/temp-store"
+    # please note that the path is relative, usually to the user's home directory on the server.
+    # giving an absolute path: "sftp://user@host:port//home/user/borgstore/temp-store"
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't.
     url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
     if url:
@@ -164,9 +166,12 @@ def test_invalid_or_remote_file_url(url):
 @pytest.mark.parametrize(
     "url,username,hostname,port,path",
     [
-        ("sftp://username@hostname:2222/some/path", "username", "hostname", 2222, "/some/path"),
-        ("sftp://username@hostname/some/path", "username", "hostname", 0, "/some/path"),
-        ("sftp://hostname/some/path", None, "hostname", 0, "/some/path"),
+        ("sftp://username@hostname:2222/rel/path", "username", "hostname", 2222, "rel/path"),
+        ("sftp://username@hostname/rel/path", "username", "hostname", 0, "rel/path"),
+        ("sftp://hostname/rel/path", None, "hostname", 0, "rel/path"),
+        ("sftp://username@hostname:2222//abs/path", "username", "hostname", 2222, "/abs/path"),
+        ("sftp://username@hostname//abs/path", "username", "hostname", 0, "/abs/path"),
+        ("sftp://hostname//abs/path", None, "hostname", 0, "/abs/path"),
     ],
 )
 def test_sftp_url(url, username, hostname, port, path):
