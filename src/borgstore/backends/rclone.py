@@ -65,8 +65,9 @@ class Rclone(BackendBase):
     This uses the rclone rc API to control an rclone rcd process.
     """
 
+    precreate_dirs: bool = False
     HOST = "localhost"
-    TRIES = 3                   # try failed load/store operations this many times
+    TRIES = 3  # try failed load/store operations this many times
 
     def __init__(self, path, *, do_fsync=False):
         if not path.endswith(":") and not path.endswith("/"):

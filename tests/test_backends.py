@@ -25,7 +25,9 @@ from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
 def get_posixfs_test_backend(tmp_path):
-    return PosixFS(tmp_path / "store")
+    be = PosixFS(tmp_path / "store")
+    be.precreate_dirs = False  # True (default) makes tests super slow.
+    return be
 
 
 @pytest.fixture()
@@ -43,7 +45,10 @@ def get_sftp_test_backend():
     # needs an authorized key loaded into the ssh agent. pytest works, tox doesn't.
     url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
     if url:
-        return get_sftp_backend(url)
+        be = get_sftp_backend(url)
+        if be is not None:
+            be.precreate_dirs = False  # True (default) makes tests super slow.
+        return be
 
 
 def check_sftp_available():

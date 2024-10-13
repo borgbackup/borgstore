@@ -8,7 +8,7 @@ Store internally uses a backend to store k/v data and adds some functionality:
 - recursive .list method
 - soft deletion
 """
-
+from binascii import hexlify
 from collections import Counter
 from contextlib import contextmanager
 import os
@@ -42,8 +42,6 @@ def get_backend(url):
 class Store:
     def __init__(self, url: Optional[str] = None, backend: Optional[BackendBase] = None, levels: Optional[dict] = None):
         self.url = url
-        levels = levels if levels else {}
-        self.set_levels(levels)
         if backend is None and url is not None:
             backend = get_backend(url)
             if backend is None:
@@ -51,6 +49,7 @@ class Store:
         if backend is None:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
+        self.set_levels(levels)
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
         self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us] -> [s]
@@ -60,12 +59,41 @@ class Store:
     def __repr__(self):
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
 
-    def set_levels(self, levels: dict) -> None:
+    def set_levels(self, levels: dict, create: bool = False) -> None:
+        if not levels or not isinstance(levels, dict):
+            raise ValueError("No or invalid levels configuration given.")
         # we accept levels as a dict, but we rather want a list of (namespace, levels) tuples, longest namespace first:
         self.levels = [entry for entry in sorted(levels.items(), key=lambda item: len(item[0]), reverse=True)]
+        if create:
+            self.create_levels()
+
+    def create_levels(self):
+        """creating any needed namespaces / directory in advance"""
+        # doing that saves a lot of ad-hoc mkdir calls, which is especially important
+        # for backends with high latency or other noticeable costs of mkdir.
+        with self:
+            for namespace, levels in self.levels:
+                namespace = namespace.rstrip("/")
+                level = max(levels)
+                if level == 0:
+                    # flat, we just need to create the namespace directory:
+                    self.backend.mkdir(namespace)
+                elif level > 0:
+                    # nested, we only need to create the deepest nesting dir layer,
+                    # any missing parent dirs will be created as needed by backend.mkdir.
+                    limit = 2 ** (level * 8)
+                    for i in range(limit):
+                        dir = hexlify(i.to_bytes(length=level, byteorder="big")).decode("ascii")
+                        name = f"{namespace}/{dir}" if namespace else dir
+                        nested_name = nest(name, level)
+                        self.backend.mkdir(nested_name[: -2 * level - 1])
+                else:
+                    raise ValueError(f"Invalid levels: {namespace}: {levels}")
 
     def create(self) -> None:
         self.backend.create()
+        if self.backend.precreate_dirs:
+            self.create_levels()
 
     def destroy(self) -> None:
         self.backend.destroy()
@@ -139,7 +167,8 @@ class Store:
         for namespace, levels in self.levels:
             if name.startswith(namespace):
                 return levels
-        return [0]  # "no nesting" is the default, if no namespace matched
+        # Store.create_levels requires all namespaces to be configured in self.levels.
+        raise KeyError(f"no matching namespace found for: {name}")
 
     def find(self, name: str, *, deleted=False) -> str:
         """

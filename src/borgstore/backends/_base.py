@@ -41,6 +41,13 @@ def validate_name(name):
 
 
 class BackendBase(ABC):
+    # a backend can request all directories to be pre-created once at backend creation (initialization) time.
+    # for some backends this will optimize the performance of store and move operation, because they won't
+    # have to care for ad-hoc directory creation for every store or move call. of course, create will take
+    # significantly longer, especially if nesting on levels > 1 is used.
+    # otoh, for some backends this might be completely pointless, e.g. if mkdir is a NOP (is ignored).
+    precreate_dirs: bool = False
+
     @abstractmethod
     def create(self):
         """create (initialize) a backend storage"""
