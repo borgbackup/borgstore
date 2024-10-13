@@ -125,16 +125,34 @@ def get_backend_from_fixture(tested_backends, request):
 
 
 @pytest.mark.parametrize(
-    "url,path",
-    [
-        ("file:///absolute/path", "/absolute/path"),  # first 2 slashes are to introduce host (empty here)
-        ("file://relative/path", "relative/path"),  # TODO: fix this, see #23
-    ],
+    "url,path", [("file:///absolute/path", "/absolute/path")]  # first 2 slashes are to introduce host (empty here)
 )
 def test_file_url(url, path):
     backend = get_file_backend(url)
     assert isinstance(backend, PosixFS)
     assert backend.base_path == Path(path).absolute()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # file://hostname/path is the generic pattern for file urls.
+        # posixfs does not support non-local fs file urls (with a non-empty hostname part).
+        # also, there is no such thing as a relative path local fs file url, #23:
+        # - "relative" would be the hostname here, not a part of a relative path,
+        #   but we do not support non-empty hostnames (== remote fs) in posixfs.
+        # - "path" would be a network fs share name here, not a part of a relative path,
+        #   this is also not supported in posixfs.
+        "file://relative/path",  # invalid "relative path" URL
+        "file://hostname/share",  # unsupported remote fs URL
+    ],
+)
+def test_invalid_or_remote_file_url(url):
+    backend = get_file_backend(url)
+    # the url is not recognized by the posixfs backend.
+    # this behaviour keeps the option open that we could have another backend that
+    # can deal with non-local fs file urls.
+    assert backend is None
 
 
 @pytest.mark.skipif(not sftp_is_available, reason="SFTP is not available")

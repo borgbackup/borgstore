@@ -17,11 +17,17 @@ from ..constants import TMP_SUFFIX
 
 def get_file_backend(url):
     # file:///absolute/path
-    # or
-    # file://relative/path (temporary hack, might change in future)
+    # notes:
+    # - we only support **local** fs **absolute** paths.
+    # - there is no such thing as a "relative path" local fs file: url
+    # - the general url syntax is proto://host/path
+    # - // introduces the host part. it is empty here, meaning localhost / local fs.
+    # - the third slash is NOT optional, it is the start of an absolute path as well
+    #   as the separator between the host and the path part.
+    # - the caller is responsible to give an absolute path.
     file_regex = r"""
-        file://
-        (?P<path>(.*))
+        file://  # only empty host part is supported
+        (?P<path>(/.*))  # path must be an absolute path
     """
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
@@ -30,7 +36,9 @@ def get_file_backend(url):
 
 class PosixFS(BackendBase):
     def __init__(self, path, *, do_fsync=False):
-        self.base_path = Path(path).absolute()
+        self.base_path = Path(path)
+        if not self.base_path.is_absolute():
+            raise BackendError("path must be an absolute path")
         self.opened = False
         self.do_fsync = do_fsync  # False = 26x faster, see #10
 
