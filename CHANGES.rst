@@ -1,6 +1,22 @@
 ChangeLog
 =========
 
+Version 0.1.0 2024-10-15
+------------------------
+
+Breaking changes:
+
+- accepted store URLs: see README
+- Store: require complete levels configuration, #46
+
+Other changes:
+
+- sftp/posixfs backends: remove ad-hoc mkdir calls, #46
+- optimize Sftp._mkdir, #80
+- sftp backend is now optional, avoids dependency issues on some platforms, #74.
+  Use pip install "borgstore[sftp]" to install with the sftp backend.
+
+
 Version 0.0.5 2024-10-01
 ------------------------
 
