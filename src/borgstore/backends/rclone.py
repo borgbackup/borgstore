@@ -40,8 +40,8 @@ if False:
 
 def get_rclone_backend(url):
     """get rclone URL
-    rclone://remote:
-    rclone://remote:path
+    rclone:remote:
+    rclone:remote:path
     """
     # Check rclone is on the path
     try:
@@ -51,7 +51,7 @@ def get_rclone_backend(url):
     if info["decomposed"] < [1, 57, 0]:
         raise BackendDoesNotExist(f"rclone binary too old - need at least version v1.57.0 - found {info['version']}")
     rclone_regex = r"""
-        rclone://
+        rclone:
         (?P<path>(.*))
     """
     m = re.match(rclone_regex, url, re.VERBOSE)

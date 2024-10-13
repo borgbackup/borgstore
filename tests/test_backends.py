@@ -67,14 +67,14 @@ def check_sftp_available():
 
 def get_rclone_test_backend():
     # To use a specific RCLONE backend
-    # export BORGSTORE_TEST_RCLONE_URL="rclone://remote:path"
+    # export BORGSTORE_TEST_RCLONE_URL="rclone:remote:path"
     # otherwise this will run an rclone backend in a temporary directory on local disk
     url = os.environ.get("BORGSTORE_TEST_RCLONE_URL")
     if not url:
         tempdir = tempfile.mkdtemp()
         # remove the temporary directory since we need to start without it
         os.rmdir(tempdir)
-        url = f"rclone://{tempdir}"
+        url = f"rclone:{tempdir}"
     return get_rclone_backend(url)
 
 
