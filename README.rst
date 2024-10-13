@@ -78,6 +78,11 @@ there can be different nesting configurations depending on the namespace.
 The Store supports operating at different nesting levels in the same
 namespace at the same time.
 
+When using nesting depth > 0, the backends will assume that keys are hashes
+(have hex digits) because some backends will want to pre-create the nesting
+directories at backend initialization time to optimize for better performance
+while using the backend.
+
 Soft deletion
 -------------
 
@@ -95,12 +100,48 @@ Backends
 The backend API is rather simple, one only needs to provide some very
 basic operations.
 
-Currently, these storage backends are implemented:
+Existing backends are listed below, more might come in future.
 
-- POSIX filesystems (namespaces: directories, values: in key-named files)
-- SFTP (access a server via sftp, namespaces: directories, values: in key-named files)
-- Rclone - access any of the 100s of cloud providers `rclone <https://rclone.org/>`_ supports
-- (more might come in future)
+posixfs
+~~~~~~~
+
+Use storage on a local POSIX filesystem:
+
+- URL: ``file:///absolute/path``
+- it is the caller's task to create an absolute fs path from a relative one.
+- namespaces: directories
+- values: in key-named files
+- pre-creates nesting directories
+
+sftp
+~~~~
+
+Use storage on a sftp server:
+
+- URL: ``sftp://user@server:port/relative/path`` (strongly recommended)
+
+  For user's and admin's convenience, mapping the URL path to the server fs path
+  depends on the server configuration (home directory, sshd/sftpd config, ...).
+  Usually the path is relative to the user's home directory.
+- URL: ``sftp://user@server:port//absolute/path``
+
+  As this uses an absolute path, things are more difficult here:
+
+  - user's config might break if server admin moves a user home to a new location.
+  - users must know the full absolute path of space they have permission to use.
+- namespaces: directories
+- values: in key-named files
+- pre-creates nesting directories
+
+rclone
+~~~~~~
+
+Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ supports:
+
+- URL: ``rclone:remote:path``, we just prefix "rclone:" and give all to the right
+  of that to rclone, see: https://rclone.org/docs/#syntax-of-remote-paths
+- implementation of this primarily depends on the specific remote.
+
 
 Scalability
 -----------
@@ -115,6 +156,19 @@ Scalability
   chunks before storing them into the store.
 - Partial loads improve performance by avoiding a full load if only a part
   of the value is needed (e.g. a header with metadata).
+
+Installation
+------------
+
+Install without the ``sftp:`` backend::
+
+    pip install borgstore
+
+Install with the ``sftp:`` backend (more dependencies)::
+
+   pip install "borgstore[sftp]"
+
+Please note that ``rclone:`` also supports sftp remotes.
 
 Want a demo?
 ------------
