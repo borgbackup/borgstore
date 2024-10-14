@@ -164,17 +164,16 @@ class Sftp(BackendBase):
     def _mkdir(self, name, *, parents=False, exist_ok=False):
         # Path.mkdir, but via sftp
         p = Path(name)
-        if parents:
-            for parent in reversed(p.parents):
-                try:
-                    self.client.mkdir(str(parent))
-                except OSError:
-                    # maybe already existed?
-                    pass
         try:
             self.client.mkdir(str(p))
         except FileNotFoundError:
-            raise  # parents == False and the parent dir is missing.
+            # the parent dir is missing
+            if not parents:
+                raise
+            # first create parent dir(s), recursively:
+            self._mkdir(p.parents[0], parents=parents, exist_ok=exist_ok)
+            # then retry:
+            self.client.mkdir(str(p))
         except OSError:
             # maybe p already existed?
             if not exist_ok:
