@@ -272,11 +272,7 @@ class Sftp(BackendBase):
             # retry, create potentially missing dirs first. this covers these cases:
             # - either the dirs were not precreated
             # - a previously existing directory was "lost" in the filesystem
-            try:
-                self._mkdir(str(parent_dir), parents=True, exist_ok=True)
-            except OSError:
-                # exists already?
-                raise  # pass
+            self._mkdir(str(parent_dir), parents=True, exist_ok=True)
             try:
                 _rename_to_new_name()
             except FileNotFoundError:
