@@ -35,9 +35,7 @@ def get_file_backend(url):
 
 
 class PosixFS(BackendBase):
-    # PosixFS implementation supports precreate = True as well as = False,
-    # but be careful: if backend creation was with precreate_dirs = False,
-    # backend usage must not be with precreate_dirs = True.
+    # PosixFS implementation supports precreate = True as well as = False.
     precreate_dirs: bool = True
 
     def __init__(self, path, *, do_fsync=False):
@@ -125,21 +123,37 @@ class PosixFS(BackendBase):
             raise ObjectNotFound(name) from None
 
     def store(self, name, value):
+        def _make_dirs():
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        def _write_to_tmpfile():
+            with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
+                f.write(value)
+                if self.do_fsync:
+                    f.flush()
+                    os.fsync(f.fileno())
+                tmp_path = Path(f.name)
+            return tmp_path
+
         if not self.opened:
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         tmp_dir = path.parent
+        # note: tmp_dir already exists, IF it was pre-created by Store.create_levels.
         if not self.precreate_dirs:
-            # note: tmp_dir already exists, if it was pre-created by Store.create_levels.
-            tmp_dir.mkdir(parents=True, exist_ok=True)
+            _make_dirs()
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
-        with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
-            f.write(value)
-            if self.do_fsync:
-                f.flush()
-                os.fsync(f.fileno())
-            tmp_path = Path(f.name)
+        try:
+            # try to do it quickly, not doing the mkdir. fs ops might be slow, esp. on network fs (latency).
+            # this will frequently succeed, because the dir is already there.
+            tmp_path = _write_to_tmpfile()
+        except FileNotFoundError:
+            # retry, create potentially missing dirs first. this covers these cases:
+            # - either the dirs were not precreated
+            # - a previously existing directory was "lost" in the filesystem
+            _make_dirs()
+            tmp_path = _write_to_tmpfile()
         # all written and synced to disk, rename it to the final name:
         try:
             tmp_path.replace(path)
@@ -157,17 +171,32 @@ class PosixFS(BackendBase):
             raise ObjectNotFound(name) from None
 
     def move(self, curr_name, new_name):
+        def _make_dirs():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _rename_to_new_name():
+            curr_path.rename(new_path)
+
         if not self.opened:
             raise BackendMustBeOpen()
         curr_path = self._validate_join(curr_name)
         new_path = self._validate_join(new_name)
+        # note: new_path.parent dir already exists, IF it was pre-created by Store.create_levels.
+        if not self.precreate_dirs:
+            _make_dirs()
         try:
-            if not self.precreate_dirs:
-                # note: new_path.parent dir already exists, if it was pre-created by Store.create_levels.
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-            curr_path.replace(new_path)
+            # try to do it quickly, not doing the mkdir. fs ops might be slow, esp. on network fs (latency).
+            # this will frequently succeed, because the dir is already there.
+            _rename_to_new_name()
         except FileNotFoundError:
-            raise ObjectNotFound(curr_name) from None
+            # retry, create potentially missing dirs first. this covers these cases:
+            # - either the dirs were not precreated
+            # - a previously existing directory was "lost" in the filesystem
+            _make_dirs()
+            try:
+                _rename_to_new_name()
+            except FileNotFoundError:
+                raise ObjectNotFound(curr_name) from None
 
     def list(self, name):
         if not self.opened:

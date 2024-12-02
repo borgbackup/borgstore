@@ -405,3 +405,29 @@ def test_must_not_be_open(tested_backends, request):
     with pytest.raises(BackendMustNotBeOpen):
         backend.destroy()
     backend.close()  # needed for test teardown to succeed
+
+
+def test_missing_nesting_dir_store(tested_backends, request):
+    with get_backend_from_fixture(tested_backends, request) as backend:
+        # for the unit tests to be fast, sftp and posixfs backends are created with
+        # .precreate_dirs = False, so we do not have precreated nesting dirs.
+        #
+        # test "as is", .store should do mkdir and write and succeed:
+        backend.store("namespace1/nest1/key1", b"value1")
+        # test so the code expects pre-created dirs (but we do not have them!) and
+        # initially does not do the mkdir. then it retries, does mkdir and write and succeeds:
+        backend.precreate_dirs = True
+        backend.store("namespace2/nest2/key2", b"value2")
+
+
+def test_missing_nesting_dir_move(tested_backends, request):
+    with get_backend_from_fixture(tested_backends, request) as backend:
+        # similar as previous test for .store, but this tests .move method.
+        # test "as is", .move should do mkdir and move and succeed:
+        backend.store("namespace1/nest1/key1", b"value1")
+        backend.move("namespace1/nest1/key1", "namespace1a/nest1a/key1a")
+        # test so the code expects pre-created dirs (but we do not have them!) and
+        # initially does not do the mkdir. then it retries, does mkdir and move and succeeds:
+        backend.precreate_dirs = True
+        backend.store("namespace2/nest2/key2", b"value2")
+        backend.move("namespace2/nest2/key2", "namespace2a/nest2a/key2a")
