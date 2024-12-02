@@ -36,7 +36,7 @@ def get_file_backend(url):
 
 class PosixFS(BackendBase):
     # PosixFS implementation supports precreate = True as well as = False.
-    precreate_dirs: bool = True
+    precreate_dirs: bool = False
 
     def __init__(self, path, *, do_fsync=False):
         self.base_path = Path(path)

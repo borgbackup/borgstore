@@ -41,7 +41,7 @@ def get_sftp_backend(url):
 
 class Sftp(BackendBase):
     # Sftp implementation supports precreate = True as well as = False.
-    precreate_dirs: bool = True
+    precreate_dirs: bool = False
 
     def __init__(self, hostname: str, path: str, port: int = 0, username: Optional[str] = None):
         self.username = username

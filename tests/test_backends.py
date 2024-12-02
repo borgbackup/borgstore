@@ -26,7 +26,6 @@ from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 def get_posixfs_test_backend(tmp_path):
     be = PosixFS(tmp_path / "store")
-    be.precreate_dirs = False  # True (default) makes tests super slow.
     return be
 
 
@@ -48,8 +47,6 @@ def get_sftp_test_backend():
     url = os.environ.get("BORGSTORE_TEST_SFTP_URL")
     if url:
         be = get_sftp_backend(url)
-        if be is not None:
-            be.precreate_dirs = False  # True (default) makes tests super slow.
         return be
 
 
@@ -412,7 +409,8 @@ def test_missing_nesting_dir_store(tested_backends, request):
         # for the unit tests to be fast, sftp and posixfs backends are created with
         # .precreate_dirs = False, so we do not have precreated nesting dirs.
         #
-        # test "as is", .store should do mkdir and write and succeed:
+        # test so the code does not expect pre-created dirs, .store should do mkdir and write and succeed:
+        assert not backend.precreate_dirs
         backend.store("namespace1/nest1/key1", b"value1")
         # test so the code expects pre-created dirs (but we do not have them!) and
         # initially does not do the mkdir. then it retries, does mkdir and write and succeeds:
@@ -423,7 +421,8 @@ def test_missing_nesting_dir_store(tested_backends, request):
 def test_missing_nesting_dir_move(tested_backends, request):
     with get_backend_from_fixture(tested_backends, request) as backend:
         # similar as previous test for .store, but this tests .move method.
-        # test "as is", .move should do mkdir and move and succeed:
+        # test so the code does not expect pre-created dirs, .move should do mkdir and move and succeed:
+        assert not backend.precreate_dirs
         backend.store("namespace1/nest1/key1", b"value1")
         backend.move("namespace1/nest1/key1", "namespace1a/nest1a/key1a")
         # test so the code expects pre-created dirs (but we do not have them!) and
