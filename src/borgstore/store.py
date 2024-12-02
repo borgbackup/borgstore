@@ -45,7 +45,7 @@ class Store:
         if backend is None and url is not None:
             backend = get_backend(url)
             if backend is None:
-                raise BackendURLInvalid(f"Invalid Backend Storage URL: {url}")
+                raise BackendURLInvalid(f"Invalid or unsupported Backend Storage URL: {url}")
         if backend is None:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
