@@ -46,6 +46,10 @@ class BackendBase(ABC):
     # have to care for ad-hoc directory creation for every store or move call. of course, create will take
     # significantly longer, especially if nesting on levels > 1 is used.
     # otoh, for some backends this might be completely pointless, e.g. if mkdir is a NOP (is ignored).
+    # for the unit tests, precreate_dirs should be set to False, otherwise they get slowed down to much.
+    # for interactive usage, precreate_dirs = False is often the less annoying, quicker option.
+    # code in .store and .move methods can deal with mkdir in the exception handler, after first just
+    # assuming that the directory is usually already there.
     precreate_dirs: bool = False
 
     @abstractmethod

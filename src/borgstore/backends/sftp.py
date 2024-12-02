@@ -40,10 +40,8 @@ def get_sftp_backend(url):
 
 
 class Sftp(BackendBase):
-    # Sftp implementation supports precreate = True as well as = False,
-    # but be careful: if backend creation was with precreate_dirs = False,
-    # backend usage must not be with precreate_dirs = True.
-    precreate_dirs: bool = True
+    # Sftp implementation supports precreate = True as well as = False.
+    precreate_dirs: bool = False
 
     def __init__(self, hostname: str, path: str, port: int = 0, username: Optional[str] = None):
         self.username = username
@@ -219,19 +217,28 @@ class Sftp(BackendBase):
             raise ObjectNotFound(name) from None
 
     def store(self, name, value):
+        def _write_to_tmpfile():
+            with self.client.open(tmp_name, mode="w") as f:
+                f.set_pipelined(True)  # speeds up the following write() significantly!
+                f.write(value)
+
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(name)
         tmp_dir = Path(name).parent
-        if not self.precreate_dirs:
-            # note: tmp_dir already exists, if it was pre-created by Store.create_levels.
-            self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         tmp_name = str(tmp_dir / ("".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8)) + TMP_SUFFIX))
-        with self.client.open(tmp_name, mode="w") as f:
-            f.set_pipelined(True)  # speeds up the following write() significantly!
-            f.write(value)
+        try:
+            # try to do it quickly, not doing the mkdir. each sftp op might be slow due to latency.
+            # this will frequently succeed, because the dir is already there.
+            _write_to_tmpfile()
+        except FileNotFoundError:
+            # retry, create potentially missing dirs first. this covers these cases:
+            # - either the dirs were not precreated
+            # - a previously existing directory was "lost" in the filesystem
+            self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
+            _write_to_tmpfile()
         # rename it to the final name:
         try:
             self.client.posix_rename(tmp_name, name)
@@ -249,22 +256,27 @@ class Sftp(BackendBase):
             raise ObjectNotFound(name) from None
 
     def move(self, curr_name, new_name):
+        def _rename_to_new_name():
+            self.client.posix_rename(curr_name, new_name)
+
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(curr_name)
         validate_name(new_name)
-        if not self.precreate_dirs:
-            # note: the parent dir of new_name already exists, if it was pre-created by Store.create_levels.
-            try:
-                parent_dir = Path(new_name).parent
-                self._mkdir(str(parent_dir), parents=True, exist_ok=True)
-            except OSError:
-                # exists already?
-                pass
+        parent_dir = Path(new_name).parent
         try:
-            self.client.posix_rename(curr_name, new_name)
+            # try to do it quickly, not doing the mkdir. each sftp op might be slow due to latency.
+            # this will frequently succeed, because the dir is already there.
+            _rename_to_new_name()
         except FileNotFoundError:
-            raise ObjectNotFound(curr_name) from None
+            # retry, create potentially missing dirs first. this covers these cases:
+            # - either the dirs were not precreated
+            # - a previously existing directory was "lost" in the filesystem
+            self._mkdir(str(parent_dir), parents=True, exist_ok=True)
+            try:
+                _rename_to_new_name()
+            except FileNotFoundError:
+                raise ObjectNotFound(curr_name) from None
 
     def list(self, name):
         if not self.opened:
