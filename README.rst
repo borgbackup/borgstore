@@ -42,8 +42,8 @@ soft deletion, so the caller doesn't have to care much for that and the Backend
 API can be much simpler:
 
 - create/destroy: initialize or remove the whole store.
-- list: flat list of the items in the given namespace, with or without soft
-  deleted items.
+- list: flat list of the items in the given namespace (by default only not
+  soft deleted items, optionally only soft deleted items).
 - store: write a new item into the store (giving its key/value pair)
 - load: read a value from the store (giving its key), partial loads giving
   offset and/or size are supported.

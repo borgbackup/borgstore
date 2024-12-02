@@ -56,7 +56,7 @@ def run_demo(storage_url):
         store.move(key2, delete=True)
 
         print(f"Listing data namespace contents: {list(store.list('data', deleted=False))}")
-        print(f"Listing data namespace contents, incl. deleted: {list(store.list('data', deleted=True))}")
+        print(f"Listing data namespace contents (only deleted): {list(store.list('data', deleted=True))}")
 
         print(f"Stats: {store.stats}")
 

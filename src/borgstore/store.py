@@ -253,8 +253,8 @@ class Store:
         """
         List all names in the namespace <name>.
 
-        If deleted is True and soft deleted items are encountered, they are yielded
-        as if they were not deleted. Otherwise, they are ignored.
+        If deleted is False (default), only normal (not soft deleted) items are yielded.
+        If deleted is True, only soft deleted items are yielded.
 
         backend.list giving us sorted names implies store.list is also sorted, if all items are stored on same level.
         """
@@ -290,5 +290,5 @@ class Store:
                 is_deleted = info.name.endswith(DEL_SUFFIX)
                 if deleted and is_deleted:
                     yield info._replace(name=info.name.removesuffix(DEL_SUFFIX))
-                elif not is_deleted:
+                elif not deleted and not is_deleted:
                     yield info
