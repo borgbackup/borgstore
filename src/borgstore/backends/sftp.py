@@ -217,9 +217,6 @@ class Sftp(BackendBase):
             raise ObjectNotFound(name) from None
 
     def store(self, name, value):
-        def _make_dirs():
-            self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
-
         def _write_to_tmpfile():
             with self.client.open(tmp_name, mode="w") as f:
                 f.set_pipelined(True)  # speeds up the following write() significantly!
@@ -229,9 +226,6 @@ class Sftp(BackendBase):
             raise BackendMustBeOpen()
         validate_name(name)
         tmp_dir = Path(name).parent
-        # note: tmp_dir already exists, IF it was pre-created by Store.create_levels.
-        if not self.precreate_dirs:
-            _make_dirs()
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         tmp_name = str(tmp_dir / ("".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8)) + TMP_SUFFIX))
@@ -243,7 +237,7 @@ class Sftp(BackendBase):
             # retry, create potentially missing dirs first. this covers these cases:
             # - either the dirs were not precreated
             # - a previously existing directory was "lost" in the filesystem
-            _make_dirs()
+            self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
             _write_to_tmpfile()
         # rename it to the final name:
         try:
@@ -262,13 +256,6 @@ class Sftp(BackendBase):
             raise ObjectNotFound(name) from None
 
     def move(self, curr_name, new_name):
-        def _make_dirs():
-            try:
-                self._mkdir(str(parent_dir), parents=True, exist_ok=True)
-            except OSError:
-                # exists already?
-                pass
-
         def _rename_to_new_name():
             self.client.posix_rename(curr_name, new_name)
 
@@ -277,9 +264,6 @@ class Sftp(BackendBase):
         validate_name(curr_name)
         validate_name(new_name)
         parent_dir = Path(new_name).parent
-        # note: the parent dir of new_name already exists, IF it was pre-created by Store.create_levels.
-        if not self.precreate_dirs:
-            _make_dirs()
         try:
             # try to do it quickly, not doing the mkdir. each sftp op might be slow due to latency.
             # this will frequently succeed, because the dir is already there.
@@ -288,7 +272,11 @@ class Sftp(BackendBase):
             # retry, create potentially missing dirs first. this covers these cases:
             # - either the dirs were not precreated
             # - a previously existing directory was "lost" in the filesystem
-            _make_dirs()
+            try:
+                self._mkdir(str(parent_dir), parents=True, exist_ok=True)
+            except OSError:
+                # exists already?
+                raise  # pass
             try:
                 _rename_to_new_name()
             except FileNotFoundError:
