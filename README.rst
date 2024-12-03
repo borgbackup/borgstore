@@ -161,6 +161,7 @@ Installation
 Install without the ``sftp:`` backend::
 
     pip install borgstore
+    pip install "borgstore[none]"  # same thing (simplifies automation)
 
 Install with the ``sftp:`` backend (more dependencies)::
 
