@@ -111,7 +111,6 @@ Use storage on a local POSIX filesystem:
 - it is the caller's task to create an absolute fs path from a relative one.
 - namespaces: directories
 - values: in key-named files
-- pre-creates nesting directories
 
 sftp
 ~~~~
@@ -131,7 +130,6 @@ Use storage on a sftp server:
   - users must know the full absolute path of space they have permission to use.
 - namespaces: directories
 - values: in key-named files
-- pre-creates nesting directories
 
 rclone
 ~~~~~~
