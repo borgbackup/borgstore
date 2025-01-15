@@ -139,6 +139,7 @@ Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ s
 - URL: ``rclone:remote:path``, we just prefix "rclone:" and give all to the right
   of that to rclone, see: https://rclone.org/docs/#syntax-of-remote-paths
 - implementation of this primarily depends on the specific remote.
+- rclone binary path can be set via the environment variable RCLONE_BINARY (default value: "rclone")
 
 
 Scalability

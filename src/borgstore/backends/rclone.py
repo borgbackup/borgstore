@@ -9,7 +9,8 @@ import subprocess
 import json
 import secrets
 from typing import Iterator
-import threading
+import time
+import socket
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import (
@@ -23,7 +24,7 @@ from .errors import (
 from ..constants import TMP_SUFFIX
 
 # rclone binary - expected to be on the path
-RCLONE = "rclone"
+RCLONE = os.environ.get("RCLONE_BINARY", "rclone")
 
 # Debug HTTP requests and responses
 if False:
@@ -36,7 +37,6 @@ if False:
     requests_log = logging.getLogger("requests.packages.urllib3")
     requests_log.setLevel(logging.DEBUG)
     requests_log.propagate = True
-
 
 def get_rclone_backend(url):
     """get rclone URL
@@ -58,7 +58,6 @@ def get_rclone_backend(url):
     if m:
         return Rclone(path=m["path"])
 
-
 class Rclone(BackendBase):
     """Borgstore backend for rclone
 
@@ -66,7 +65,7 @@ class Rclone(BackendBase):
     """
 
     precreate_dirs: bool = False
-    HOST = "localhost"
+    HOST = "127.0.0.1"
     TRIES = 3  # try failed load/store operations this many times
 
     def __init__(self, path, *, do_fsync=False):
@@ -78,44 +77,52 @@ class Rclone(BackendBase):
         self.user = "borg"
         self.password = secrets.token_urlsafe(32)
 
+    def find_open_port(self):
+        with socket.socket() as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((self.HOST, 0))
+            return s.getsockname()[1]
+
+    def check_port(self, port):
+        with socket.socket() as s:
+            try:
+                s.connect((self.HOST, port))
+                return True
+            except ConnectionRefusedError:
+                return False
+
     def open(self):
         """
         Start using the rclone server
         """
         if self.process:
             raise BackendMustNotBeOpen()
-        # Open rclone rcd listening on a random port with random auth
-        args = [
-            RCLONE,
-            "rcd",
-            "--rc-user",
-            self.user,
-            "--rc-addr",
-            self.HOST + ":0",
-            "--rc-serve",
-            "--use-server-modtime",
-        ]
-        env = os.environ.copy()
-        env["RCLONE_RC_PASS"] = self.password  # pass password by env var so it isn't in process list
-        self.process = subprocess.Popen(
-            args, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=env
-        )
-        # Read the log line with the port in it
-        line = self.process.stderr.readline()
-        m = re.search(rb"(http://.*/)", line)
-        if not m:
-            raise BackendDoesNotExist(f"rclone rcd did not return URL in log line: {line}")
-        self.url = m.group(1).decode("utf-8")
-
-        def discard():
-            """discard log output on stderr so we don't block the process"""
-            while True:
-                line = self.process.stderr.readline()
-                if not line:
-                    break  # Process has finished
-
-        thread = threading.Thread(target=discard, daemon=True)
-        thread.start()
+        while not self.process:
+            port = self.find_open_port()
+            # Open rclone rcd listening on a random port with random auth
+            args = [
+                RCLONE,
+                "rcd",
+                "--rc-user",
+                self.user,
+                "--rc-addr",
+                f"{self.HOST}:{port}",
+                "--rc-serve",
+                "--use-server-modtime",
+            ]
+            env = os.environ.copy()
+            env["RCLONE_RC_PASS"] = self.password  # pass password by env var so it isn't in process list
+            self.process = subprocess.Popen(
+                args, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=env
+            )
+            self.url = f"http://{self.HOST}:{port}/"
+            # Wait for rclone to start up
+            while self.process.poll() is None and not self.check_port(port):
+                time.sleep(0.01)
+            if self.process.poll() is None:
+                self.noop("noop")
+            else:
+                self.process = None
 
     def close(self):
         """
@@ -195,6 +202,10 @@ class Rclone(BackendBase):
         self.close()
         return False
 
+    def noop(self, value):
+        """noop request that returns back the provided value <value>"""
+        return self._rpc("rc/noop", { "value": value })
+        
     def mkdir(self, name: str) -> None:
         """create directory/namespace <name>"""
         validate_name(name)
