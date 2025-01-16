@@ -38,6 +38,7 @@ if False:
     requests_log.setLevel(logging.DEBUG)
     requests_log.propagate = True
 
+
 def get_rclone_backend(url):
     """get rclone URL
     rclone:remote:
@@ -57,6 +58,7 @@ def get_rclone_backend(url):
     m = re.match(rclone_regex, url, re.VERBOSE)
     if m:
         return Rclone(path=m["path"])
+
 
 class Rclone(BackendBase):
     """Borgstore backend for rclone
@@ -204,8 +206,8 @@ class Rclone(BackendBase):
 
     def noop(self, value):
         """noop request that returns back the provided value <value>"""
-        return self._rpc("rc/noop", { "value": value })
-        
+        return self._rpc("rc/noop", {"value": value})
+
     def mkdir(self, name: str) -> None:
         """create directory/namespace <name>"""
         validate_name(name)
