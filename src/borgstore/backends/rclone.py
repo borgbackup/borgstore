@@ -79,7 +79,7 @@ class Rclone(BackendBase):
         self.user = "borg"
         self.password = secrets.token_urlsafe(32)
 
-    def find_open_port(self):
+    def find_available_port(self):
         with socket.socket() as s:
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind((self.HOST, 0))
@@ -100,7 +100,7 @@ class Rclone(BackendBase):
         if self.process:
             raise BackendMustNotBeOpen()
         while not self.process:
-            port = self.find_open_port()
+            port = self.find_available_port()
             # Open rclone rcd listening on a random port with random auth
             args = [
                 RCLONE,
