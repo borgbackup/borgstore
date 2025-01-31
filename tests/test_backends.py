@@ -21,6 +21,7 @@ from borgstore.backends.errors import (
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.backends.rclone import Rclone, get_rclone_backend
+from borgstore.backends.s3 import S3, get_s3_backend
 from borgstore.constants import ROOTNS, TMP_SUFFIX
 
 
@@ -87,9 +88,29 @@ def check_rclone_available():
         be.destroy()
         return True
 
+def get_s3_test_backend():
+    # export BORGSTORE_TEST_S3_URL="s3:profile@hostname:port/bucket/path"
+    url = os.environ.get("BORGSTORE_TEST_S3_URL")
+    if not url:
+        return None
+    return get_s3_backend(url)
+
+
+def check_s3_available():
+    """in some test environments, get_s3_backend() does not result in a working s3 backend"""
+    try:
+        be = get_s3_test_backend()
+        be.create()  # first s3 activity happens here
+    except Exception as e:
+        print(f"S3 backend create failed {repr(e)}")
+        return False  # use "raise" here for debugging s3 store issues
+    else:
+        be.destroy()
+        return True
 
 sftp_is_available = check_sftp_available()
 rclone_is_available = check_rclone_available()
+s3_is_available = check_rclone_available()
 
 
 @pytest.fixture(scope="function")
@@ -112,6 +133,16 @@ def rclone_backend_created():
         be.destroy()
 
 
+@pytest.fixture(scope="function")
+def s3_backend_created():
+    be = get_s3_test_backend()
+    be.create()
+    try:
+        yield be
+    finally:
+        be.destroy()
+
+
 def pytest_generate_tests(metafunc):
     # Generates tests for misc. storages
     if "tested_backends" in metafunc.fixturenames:
@@ -120,6 +151,8 @@ def pytest_generate_tests(metafunc):
             tested_backends += ["sftp_backend_created"]
         if rclone_is_available:
             tested_backends += ["rclone_backend_created"]
+        if s3_is_available:
+            tested_backends += ["s3_backend_created"]
         metafunc.parametrize("tested_backends", tested_backends)
 
 
