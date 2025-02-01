@@ -112,6 +112,7 @@ sftp_is_available = check_sftp_available()
 rclone_is_available = check_rclone_available()
 s3_is_available = check_s3_available()
 
+
 @pytest.fixture(scope="function")
 def sftp_backend_created():
     be = get_sftp_test_backend()
