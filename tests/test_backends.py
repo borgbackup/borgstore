@@ -89,7 +89,7 @@ def check_rclone_available():
         return True
 
 def get_s3_test_backend():
-    # export BORGSTORE_TEST_S3_URL="s3:profile@hostname:port/bucket/path"
+    # export BORGSTORE_TEST_S3_URL="s3:test@http://hostname:port/test/path"
     url = os.environ.get("BORGSTORE_TEST_S3_URL")
     if not url:
         return None
@@ -110,8 +110,7 @@ def check_s3_available():
 
 sftp_is_available = check_sftp_available()
 rclone_is_available = check_rclone_available()
-s3_is_available = check_rclone_available()
-
+s3_is_available = check_s3_available()
 
 @pytest.fixture(scope="function")
 def sftp_backend_created():

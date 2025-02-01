@@ -3,56 +3,71 @@ try:
 except ImportError:
     boto3 = None
 
-import random
 import re
-from pathlib import Path
 from typing import Optional
+
+from borgstore.constants import TMP_SUFFIX
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
-from ..constants import TMP_SUFFIX
+
 
 def get_s3_backend(url):
     if boto3 is None:
         return None
-    
-    # s3:profile@hostname:port/bucket/path
+
+    # s3:profile@schema://hostname:port/bucket/path
     s3_regex = r"""
         s3:
         ((?P<profile>[^@]+)@)?  # optional profile
-        (?P<hostname>[^:/]+)  # hostname
-        (:(?P<port>\d+))?/  # optional port
+        ((?P<schema>[^:/]+)://(?P<hostname>[^:/]+)(:(?P<port>\d+))?)/  # optional port
         (?P<bucket>[^/]+)/  # bucket name
         (?P<path>.+)  # path
     """
     m = re.match(s3_regex, url, re.VERBOSE)
     if m:
         profile = m["profile"]
+        schema = m["schema"]
         hostname = m["hostname"]
         port = m["port"]
         bucket = m["bucket"]
         path = m["path"]
 
-        endpoint_scheme = "https" if not port or port not in ("80", "8080") else "http"
-        endpoint_url = f"{endpoint_scheme}://{hostname}:{port}" if port else f"{endpoint_scheme}://{hostname}"
-
+        endpoint_url = None
+        if schema and hostname:
+            endpoint_url = f"{schema}://{hostname}"
+            if port:
+                endpoint_url += f":{port}"
         return S3(bucket=bucket, path=path, profile=profile, endpoint_url=endpoint_url)
+
 
 class S3(BackendBase):
     def __init__(self, bucket: str, path: str, profile: Optional[str] = None, endpoint_url: Optional[str] = None):
+        self.delimiter = '/'
+        self.dir_file = '.dir'
         self.bucket = bucket
-        self.base_path = path.rstrip('/') + '/'  # Ensure it ends with '/'
+        self.base_path = path.rstrip(self.delimiter) + self.delimiter  # Ensure it ends with '/'
         self.opened = False
         session = boto3.Session(profile_name=profile) if profile else boto3.Session()
         self.s3 = session.client("s3", endpoint_url=endpoint_url)
+
+    def _mkdir(self, name):
+        try:
+            key = (self.base_path + name).rstrip(self.delimiter) + self.delimiter + self.dir_file
+            self.s3.put_object(Bucket=self.bucket, Key=key)
+        except self.s3.exceptions.ClientError as e:
+            raise BackendError(f"S3 error: {e}")
 
     def create(self):
         if self.opened:
             raise BackendMustNotBeOpen()
         try:
-            self.s3.head_bucket(Bucket=self.bucket)
-            self.s3.put_object(Bucket=self.bucket, Key=self.base_path, Body=b"")
+            objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.base_path,
+                                              Delimiter=self.delimiter, MaxKeys=1)
+            if objects["KeyCount"] > 0:
+                raise BackendAlreadyExists(f"Backend already exists: {self.base_path}")
+            self._mkdir("")
         except self.s3.exceptions.NoSuchBucket:
             raise BackendDoesNotExist(f"S3 bucket does not exist: {self.bucket}")
         except self.s3.exceptions.ClientError as e:
@@ -62,12 +77,19 @@ class S3(BackendBase):
         if self.opened:
             raise BackendMustNotBeOpen()
         try:
-            objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.base_path)
-            if "Contents" in objects:
-                self.s3.delete_objects(
-                    Bucket=self.bucket,
-                    Delete={"Objects": [{"Key": obj["Key"]} for obj in objects["Contents"]]}
-                )
+            objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.base_path,
+                                              Delimiter=self.delimiter, MaxKeys=1)
+            if objects["KeyCount"] == 0:
+                raise BackendDoesNotExist(f"Backend does not exist: {self.base_path}")
+            is_truncated = True
+            while is_truncated:
+                objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=self.base_path, MaxKeys=1000)
+                is_truncated = objects['IsTruncated']
+                if "Contents" in objects:
+                    self.s3.delete_objects(
+                        Bucket=self.bucket,
+                        Delete={"Objects": [{"Key": obj["Key"]} for obj in objects["Contents"]]}
+                    )
         except self.s3.exceptions.ClientError as e:
             raise BackendError(f"S3 error: {e}")
 
@@ -94,8 +116,20 @@ class S3(BackendBase):
         validate_name(name)
         key = self.base_path + name
         try:
-            obj = self.s3.get_object(Bucket=self.bucket, Key=key)
-            return obj["Body"].read()[offset:offset + (size or len(obj["Body"].read()))]
+            if size is None and offset == 0:
+                obj = self.s3.get_object(Bucket=self.bucket, Key=key)
+                return obj["Body"].read()
+            elif size is not None and offset == 0:
+                obj = self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes=0-{size - 1}")
+                return obj["Body"].read()
+            elif size is None and offset != 0:
+                head = self.s3.head_object(Bucket=self.bucket, Key=key)
+                length = head["ContentLength"]
+                obj = self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes={offset}-{length - 1}")
+                return obj["Body"].read()
+            elif size is not None and offset != 0:
+                obj = self.s3.get_object(Bucket=self.bucket, Key=key, Range=f"bytes={offset}-{offset + size - 1}")
+                return obj["Body"].read()
         except self.s3.exceptions.NoSuchKey:
             raise ObjectNotFound(name)
 
@@ -105,9 +139,13 @@ class S3(BackendBase):
         validate_name(name)
         key = self.base_path + name
         try:
+            self.s3.head_object(Bucket=self.bucket, Key=key)
             self.s3.delete_object(Bucket=self.bucket, Key=key)
         except self.s3.exceptions.NoSuchKey:
             raise ObjectNotFound(name)
+        except self.s3.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                raise ObjectNotFound(name)
 
     def move(self, curr_name, new_name):
         if not self.opened:
@@ -126,27 +164,66 @@ class S3(BackendBase):
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(name)
-        prefix = self.base_path + name.rstrip('/') + '/'
+        base_prefix = (self.base_path + name).rstrip(self.delimiter) + self.delimiter
         try:
-            objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=prefix, Delimiter='/')
-            if "Contents" not in objects and "CommonPrefixes" not in objects:
-                raise ObjectNotFound(name)
-            for obj in objects.get("Contents", []):
-                obj_name = obj["Key"][len(self.base_path):]  # Remove base_path prefix
-                yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=False)
-            for prefix in objects.get("CommonPrefixes", []):
-                dir_name = prefix["Prefix"][len(self.base_path):-1]  # Remove base_path prefix and trailing slash
-                yield ItemInfo(name=dir_name, exists=True, size=0, directory=True)
+            start_after = ''
+            is_truncated = True
+            while is_truncated:
+                objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=base_prefix,
+                                                  Delimiter=self.delimiter, MaxKeys=1000, StartAfter=start_after)
+                if objects['KeyCount'] == 0:
+                    raise ObjectNotFound(name)
+                is_truncated = objects["IsTruncated"]
+                if "Contents" not in objects and "CommonPrefixes" not in objects:
+                    pass
+                for obj in objects.get("Contents", []):
+                    obj_name = obj["Key"][len(base_prefix):]  # Remove base_path prefix
+                    if obj_name == self.dir_file:
+                        continue
+                    if obj_name.endswith(TMP_SUFFIX):
+                        continue
+                    start_after = obj["Key"]
+                    yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=obj["Size"] == 0)
+                for prefix in objects.get("CommonPrefixes", []):
+                    dir_name = prefix["Prefix"][len(base_prefix):-1]  # Remove base_path prefix and trailing slash
+                    yield ItemInfo(name=dir_name, exists=True, size=0, directory=True)
         except self.s3.exceptions.ClientError as e:
+            raise BackendError(f"S3 error: {e}")
+
+    def mkdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
+        validate_name(name)
+        self._mkdir(name)
+
+    def rmdir(self, name):
+        if not self.opened:
+            raise BackendMustBeOpen()
+        validate_name(name)
+        prefix = self.base_path + name.rstrip(self.delimiter) + self.delimiter
+        objects = self.s3.list_objects_v2(Bucket=self.bucket, Prefix=prefix, Delimiter=self.delimiter, MaxKeys=2)
+        if "Contents" in objects and len(objects["Contents"]) > 1:
+            raise BackendError(f"Directory not empty: {name}")
+        self.s3.delete_object(Bucket=self.bucket, Key=prefix + self.dir_file)
+
+    def _info(self, name):
+        validate_name(name)
+        key = self.base_path + name
+        try:
+            obj = self.s3.head_object(Bucket=self.bucket, Key=key)
+            return ItemInfo(name=name, exists=True, directory=False, size=obj["ContentLength"])
+        except self.s3.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                try:
+                    self.s3.head_object(Bucket=self.bucket, Key=key + self.delimiter + self.dir_file)
+                    return ItemInfo(name=name, exists=True, directory=True, size=0)
+                except self.s3.exceptions.ClientError:
+                    pass
+                return ItemInfo(name=name, exists=False, directory=False, size=0)
             raise BackendError(f"S3 error: {e}")
 
     def info(self, name):
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(name)
-        key = self.base_path + name
-        try:
-            obj = self.s3.head_object(Bucket=self.bucket, Key=key)
-            return ItemInfo(name=name, exists=True, directory=False, size=obj["ContentLength"])
-        except self.s3.exceptions.NoSuchKey:
-            return ItemInfo(name=name, exists=False, directory=False, size=0)
+        return self._info(name)
