@@ -44,19 +44,19 @@ def get_rclone_backend(url):
     rclone:remote:
     rclone:remote:path
     """
-    # Check rclone is on the path
-    try:
-        info = json.loads(subprocess.check_output([RCLONE, "rc", "--loopback", "core/version"]))
-    except Exception:
-        raise BackendDoesNotExist("rclone binary not found on the path or not working properly")
-    if info["decomposed"] < [1, 57, 0]:
-        raise BackendDoesNotExist(f"rclone binary too old - need at least version v1.57.0 - found {info['version']}")
     rclone_regex = r"""
         rclone:
         (?P<path>(.*))
     """
     m = re.match(rclone_regex, url, re.VERBOSE)
     if m:
+        # Check rclone is on the path
+        try:
+            info = json.loads(subprocess.check_output([RCLONE, "rc", "--loopback", "core/version"]))
+        except Exception:
+            raise BackendDoesNotExist("rclone binary not found on the path or not working properly")
+        if info["decomposed"] < [1, 57, 0]:
+            raise BackendDoesNotExist(f"rclone binary too old - need at least version v1.57.0 - found {info['version']}")
         return Rclone(path=m["path"])
 
 
