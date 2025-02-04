@@ -89,7 +89,10 @@ def check_rclone_available():
         return True
 
 def get_s3_test_backend():
-    # export BORGSTORE_TEST_S3_URL="s3:test@http://hostname:port/test/path"
+    # export BORGSTORE_TEST_S3_URL="s3:[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path"
+    # export BORGSTORE_TEST_S3_URL="s3:/test/path"
+    # export BORGSTORE_TEST_S3_URL="s3:test@http://172.28.52.116:9000/test/path"
+    # export BORGSTORE_TEST_S3_URL="s3:test:testsecret@http://172.28.52.116:9000/test/path"
     url = os.environ.get("BORGSTORE_TEST_S3_URL")
     if not url:
         return None

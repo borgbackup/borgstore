@@ -17,17 +17,30 @@ def get_s3_backend(url):
     if boto3 is None:
         return None
 
-    # s3:profile@schema://hostname:port/bucket/path
+    # s3:[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     s3_regex = r"""
         s3:
-        ((?P<profile>[^@]+)@)?  # optional profile
-        ((?P<schema>[^:/]+)://(?P<hostname>[^:/]+)(:(?P<port>\d+))?)/  # optional port
+        ((
+            (?P<profile>[^@:]+)  # profile (no colons allowed)
+            |
+            (?P<access_key_id>[^:@]+):(?P<access_key_secret>[^@]+)  # access key and secret
+        )@)?  # optional authentication
+        (?P<schema>[^:/]+)://
+        (?P<hostname>[^:/]+)
+        (:(?P<port>\d+))?/
         (?P<bucket>[^/]+)/  # bucket name
         (?P<path>.+)  # path
     """
     m = re.match(s3_regex, url, re.VERBOSE)
+    print(m)
     if m:
         profile = m["profile"]
+        access_key_id = m["access_key_id"]
+        access_key_secret = m["access_key_secret"]
+        if profile is not None and access_key_id is not None:
+            raise BackendError("S3: profile and access_key_id cannot be specified at the same time")
+        if access_key_id is not None and access_key_secret is None:
+            raise BackendError("S3: access_key_secret is mandatory when access_key_id is specified")
         schema = m["schema"]
         hostname = m["hostname"]
         port = m["port"]
@@ -39,17 +52,22 @@ def get_s3_backend(url):
             endpoint_url = f"{schema}://{hostname}"
             if port:
                 endpoint_url += f":{port}"
-        return S3(bucket=bucket, path=path, profile=profile, endpoint_url=endpoint_url)
+        return S3(bucket=bucket, path=path, profile=profile, access_key_id=access_key_id, access_key_secret=access_key_secret, endpoint_url=endpoint_url)
 
 
 class S3(BackendBase):
-    def __init__(self, bucket: str, path: str, profile: Optional[str] = None, endpoint_url: Optional[str] = None):
+    def __init__(self, bucket: str, path: str, profile: Optional[str] = None, access_key_id: Optional[str] = None, access_key_secret: Optional[str] = None, endpoint_url: Optional[str] = None):
         self.delimiter = '/'
         self.dir_file = '.dir'
         self.bucket = bucket
         self.base_path = path.rstrip(self.delimiter) + self.delimiter  # Ensure it ends with '/'
         self.opened = False
-        session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+        if profile: 
+            session = boto3.Session(profile_name=profile)
+        elif access_key_id and access_key_secret:
+            session = boto3.Session(aws_access_key_id=access_key_id, aws_secret_access_key=access_key_secret)
+        else:
+            session = boto3.Session()
         self.s3 = session.client("s3", endpoint_url=endpoint_url)
 
     def _mkdir(self, name):
