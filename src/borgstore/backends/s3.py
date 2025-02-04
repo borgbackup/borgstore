@@ -52,17 +52,20 @@ def get_s3_backend(url):
             endpoint_url = f"{schema}://{hostname}"
             if port:
                 endpoint_url += f":{port}"
-        return S3(bucket=bucket, path=path, profile=profile, access_key_id=access_key_id, access_key_secret=access_key_secret, endpoint_url=endpoint_url)
+        return S3(bucket=bucket, path=path, profile=profile,
+                  access_key_id=access_key_id, access_key_secret=access_key_secret, endpoint_url=endpoint_url)
 
 
 class S3(BackendBase):
-    def __init__(self, bucket: str, path: str, profile: Optional[str] = None, access_key_id: Optional[str] = None, access_key_secret: Optional[str] = None, endpoint_url: Optional[str] = None):
+    def __init__(self, bucket: str, path: str, profile: Optional[str] = None,
+                 access_key_id: Optional[str] = None, access_key_secret: Optional[str] = None,
+                 endpoint_url: Optional[str] = None):
         self.delimiter = '/'
         self.dir_file = '.dir'
         self.bucket = bucket
         self.base_path = path.rstrip(self.delimiter) + self.delimiter  # Ensure it ends with '/'
         self.opened = False
-        if profile: 
+        if profile:
             session = boto3.Session(profile_name=profile)
         elif access_key_id and access_key_secret:
             session = boto3.Session(aws_access_key_id=access_key_id, aws_secret_access_key=access_key_secret)
