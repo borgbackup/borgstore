@@ -183,7 +183,7 @@ class S3(BackendBase):
                     if obj_name.endswith(TMP_SUFFIX):
                         continue
                     start_after = obj["Key"]
-                    yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=obj["Size"] == 0)
+                    yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=False)
                 for prefix in objects.get("CommonPrefixes", []):
                     dir_name = prefix["Prefix"][len(base_prefix):-1]  # Remove base_path prefix and trailing slash
                     yield ItemInfo(name=dir_name, exists=True, size=0, directory=True)
