@@ -430,3 +430,14 @@ def test_missing_nesting_dir_move(tested_backends, request):
         backend.precreate_dirs = True
         backend.store("namespace2/nest2/key2", b"value2")
         backend.move("namespace2/nest2/key2", "namespace2a/nest2a/key2a")
+
+
+def test_posixfs_missing_parent_dirs(tmp_path):
+    be = PosixFS(tmp_path / "missing_parent_dir1" / "missing_parent_dir2" / "store")
+    be.create()  # this should work, auto-creating the missing parent dir(s)
+    # try to use the store to make sure it works
+    be.open()
+    try:
+        be.store("key", b"value")
+    finally:
+        be.close()
