@@ -48,11 +48,12 @@ class PosixFS(BackendBase):
     def create(self):
         if self.opened:
             raise BackendMustNotBeOpen()
-        try:
-            # we accept an already existing directory, but we do not create parent dirs:
-            self.base_path.mkdir(exist_ok=True, parents=False)
-        except FileNotFoundError:
-            raise BackendError(f"posixfs storage base path's parent directory does not exist: {self.base_path}")
+        # we accept an already existing empty directory and we also optionally create
+        # any missing parent dirs. the latter is important for repository hosters that
+        # only offer limited access to their storage (e.g. only via borg/borgstore).
+        # also, it is simpler than requiring users to create parent dirs separately.
+        self.base_path.mkdir(exist_ok=True, parents=True)
+        # avoid that users create a mess by using non-empty directories:
         contents = list(self.base_path.iterdir())
         if contents:
             raise BackendAlreadyExists(f"posixfs storage base path is not empty: {self.base_path}")

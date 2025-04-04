@@ -106,11 +106,12 @@ class Sftp(BackendBase):
             raise BackendMustNotBeOpen()
         self._connect()
         try:
-            try:
-                # we accept an already existing directory, but we do not create parent dirs:
-                self._mkdir(self.base_path, exist_ok=True, parents=False)
-            except FileNotFoundError:
-                raise BackendError(f"sftp storage base path's parent directory does not exist: {self.base_path}")
+            # we accept an already existing empty directory and we also optionally create
+            # any missing parent dirs. the latter is important for repository hosters that
+            # only offer limited access to their storage (e.g. only via borg/borgstore).
+            # also, it is simpler than requiring users to create parent dirs separately.
+            self._mkdir(self.base_path, exist_ok=True, parents=True)
+            # avoid that users create a mess by using non-empty directories:
             contents = list(self.client.listdir(self.base_path))
             if contents:
                 raise BackendAlreadyExists(f"sftp storage base path is not empty: {self.base_path}")
