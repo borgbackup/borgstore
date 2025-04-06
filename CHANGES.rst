@@ -1,6 +1,34 @@
 ChangeLog
 =========
 
+Version 0.2.0 (not released yet)
+--------------------------------
+
+Breaking changes:
+
+- Store.list: changed deleted argument semantics, #83:
+
+  - True: list ONLY soft deleted items
+  - False: list ONLY not soft deleted items
+
+New features:
+
+- posixfs/sftp: create missing parent dirs of the base path
+- rclone: add a way to specify the path to the rclone binary for custom installations
+
+Bug fixes:
+
+- rclone: fix discard thread issues, #92
+- rclone: check rclone regex before raising rclone related exceptions
+
+Other changes:
+
+- posixfs: also support windows file:/// URLs, #82
+- posixfs / sftp: optimize mkdir usage, add retry, #85
+- posixfs / sftp: change .precreate_dirs default to False
+- rclone init: use a random port instead on relying on rclone to pick one
+
+
 Version 0.1.0 2024-10-15
 ------------------------
 
