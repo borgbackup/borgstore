@@ -4,6 +4,7 @@ Filesystem based backend implementation - uses files in directories below a base
 
 import os
 import re
+import sys
 from pathlib import Path
 import shutil
 import stat
@@ -25,10 +26,20 @@ def get_file_backend(url):
     # - the third slash is NOT optional, it is the start of an absolute path as well
     #   as the separator between the host and the path part.
     # - the caller is responsible to give an absolute path.
-    file_regex = r"""
-        file://  # only empty host part is supported
-        (?P<path>(/.*))  # path must be an absolute path
+    # - windows: see there: https://en.wikipedia.org/wiki/File_URI_scheme
+    windows_file_regex = r"""
+        file://  # only empty host part is supported.
+        /  # 3rd slash is separator ONLY, not part of the path.
+        (?P<drive_and_path>([a-zA-Z]:/.*))  # path must be an absolute path.
     """
+    file_regex = r"""
+        file://  # only empty host part is supported.
+        (?P<path>(/.*))  # path must be an absolute path. 3rd slash is separator AND part of the path.
+    """
+    if sys.platform in ("win32", "msys", "cygwin"):
+        m = re.match(windows_file_regex, url, re.VERBOSE)
+        if m:
+            return PosixFS(path=m["drive_and_path"])
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
         return PosixFS(path=m["path"])
