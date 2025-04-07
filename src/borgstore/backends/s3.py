@@ -32,7 +32,6 @@ def get_s3_backend(url):
         (?P<path>.+)  # path
     """
     m = re.match(s3_regex, url, re.VERBOSE)
-    print(m)
     if m:
         profile = m["profile"]
         access_key_id = m["access_key_id"]
@@ -195,8 +194,6 @@ class S3(BackendBase):
                 if objects['KeyCount'] == 0:
                     raise ObjectNotFound(name)
                 is_truncated = objects["IsTruncated"]
-                if "Contents" not in objects and "CommonPrefixes" not in objects:
-                    pass
                 for obj in objects.get("Contents", []):
                     obj_name = obj["Key"][len(base_prefix):]  # Remove base_path prefix
                     if obj_name == self.dir_file:
