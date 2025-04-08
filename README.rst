@@ -141,6 +141,34 @@ Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ s
 - implementation of this primarily depends on the specific remote.
 
 
+s3
+~~
+
+Use storage on an S3-compliant cloud service:
+
+- URL: ``s3:[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path``
+
+  The underlying backend is based on ``boto3``, so all standard boto3 authentication methods are supported:
+  
+  - provide a named profile (from your boto3 config),
+  - include access key ID and secret in the URL,
+  - or use default credentials (e.g., environment variables, IAM roles, etc.).
+
+  See the `boto3 credentials documentation <https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html>`_ for more details.
+
+  If you're connecting to **AWS S3**, the ``[schema://hostname[:port]]`` part is optional.
+  Bucket and path are always required.
+
+  .. note::
+
+     There is a known issue with some S3-compatible services (e.g., **Backblaze B2**).
+     If you encounter problems, try using ``boto3==1.26.100``.
+
+- namespaces: directories
+- values: in key-named files
+- directory creation: simulated by writing an empty ``.dir`` file (0 bytes) inside the directory
+
+
 Scalability
 -----------
 
@@ -158,7 +186,7 @@ Scalability
 Installation
 ------------
 
-Install without the ``sftp:`` backend::
+Install without the ``sftp:`` or ``s3:`` backend::
 
     pip install borgstore
     pip install "borgstore[none]"  # same thing (simplifies automation)
@@ -167,7 +195,11 @@ Install with the ``sftp:`` backend (more dependencies)::
 
    pip install "borgstore[sftp]"
 
-Please note that ``rclone:`` also supports sftp remotes.
+Install with the ``s3:`` backend (more dependencies)::
+
+   pip install "borgstore[s3]"
+
+Please note that ``rclone:`` also supports sftp or s3 remotes.
 
 Want a demo?
 ------------
