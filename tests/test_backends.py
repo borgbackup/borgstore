@@ -106,7 +106,7 @@ def check_s3_available():
         be = get_s3_test_backend()
         be.create()  # first s3 activity happens here
     except Exception as e:
-        raise(f"S3 backend create failed {repr(e)}")
+        print(f"S3 backend create failed {repr(e)}")
         return False  # use "raise" here for debugging s3 store issues
     else:
         be.destroy()

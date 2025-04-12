@@ -58,9 +58,9 @@ def get_s3_backend(url):
             endpoint_url = f"{schema}://{hostname}"
             if port:
                 endpoint_url += f":{port}"
-        return S3(bucket=bucket, path=path, is_b2 = s3type == "b2", profile=profile,
-                access_key_id=access_key_id, access_key_secret=access_key_secret,
-                endpoint_url=endpoint_url)
+        return S3(bucket=bucket, path=path, is_b2=s3type == "b2", profile=profile,
+                  access_key_id=access_key_id, access_key_secret=access_key_secret,
+                  endpoint_url=endpoint_url)
 
 
 class S3(BackendBase):
