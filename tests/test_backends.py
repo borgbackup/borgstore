@@ -92,7 +92,8 @@ def get_s3_test_backend():
     # export BORGSTORE_TEST_S3_URL="s3:[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path"
     # export BORGSTORE_TEST_S3_URL="s3:/test/path"
     # export BORGSTORE_TEST_S3_URL="s3:test@http://172.28.52.116:9000/test/path"
-    # export BORGSTORE_TEST_S3_URL="s3:test:testsecret@http://172.28.52.116:9000/test/path"
+    # export BORGSTORE_TEST_S3_URL="s3:test:testtest@http://172.28.52.116:9000/test/path"
+    # export BORGSTORE_TEST_S3_URL="b2:test:testtest@https://s3.us-east-005.backblazeb2.com/test/path"
     url = os.environ.get("BORGSTORE_TEST_S3_URL")
     if not url:
         return None
@@ -105,7 +106,7 @@ def check_s3_available():
         be = get_s3_test_backend()
         be.create()  # first s3 activity happens here
     except Exception as e:
-        print(f"S3 backend create failed {repr(e)}")
+        raise(f"S3 backend create failed {repr(e)}")
         return False  # use "raise" here for debugging s3 store issues
     else:
         be.destroy()

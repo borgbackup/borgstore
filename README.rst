@@ -146,7 +146,7 @@ s3
 
 Use storage on an S3-compliant cloud service:
 
-- URL: ``s3:[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path``
+- URL: ``(s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path``
 
   The underlying backend is based on ``boto3``, so all standard boto3 authentication methods are supported:
   
@@ -162,11 +162,10 @@ Use storage on an S3-compliant cloud service:
   .. note::
 
      There is a known issue with some S3-compatible services (e.g., **Backblaze B2**).
-     If you encounter problems, try using ``boto3==1.26.100``.
+     If you encounter problems, try using ``b2:`` instead of ``s3:`` in the url.
 
 - namespaces: directories
 - values: in key-named files
-- directory creation: simulated by writing an empty ``.dir`` file (0 bytes) inside the directory
 
 
 Scalability
