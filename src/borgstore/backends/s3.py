@@ -15,7 +15,7 @@ from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, Backe
 from .errors import ObjectNotFound
 
 
-def get_s3_backend(url):
+def get_s3_backend(url: str):
     if boto3 is None:
         return None
 
@@ -35,7 +35,7 @@ def get_s3_backend(url):
     """
     m = re.match(s3_regex, url, re.VERBOSE)
     if m:
-        s3type = "s3" if "s3:" in url else "b2"
+        s3type = "s3" if url.find("s3:") == 0 else "b2"
         profile = m["profile"]
         access_key_id = m["access_key_id"]
         access_key_secret = m["access_key_secret"]
