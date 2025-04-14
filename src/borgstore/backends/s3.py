@@ -21,7 +21,7 @@ def get_s3_backend(url: str):
 
     # (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     s3_regex = r"""
-        (s3|b2):
+        (?P<s3type>(s3|b2)):
         ((
             (?P<profile>[^@:]+)  # profile (no colons allowed)
             |
@@ -35,7 +35,7 @@ def get_s3_backend(url: str):
     """
     m = re.match(s3_regex, url, re.VERBOSE)
     if m:
-        s3type = "s3" if url.find("s3:") == 0 else "b2"
+        s3type = m["s3type"]
         profile = m["profile"]
         access_key_id = m["access_key_id"]
         access_key_secret = m["access_key_secret"]
