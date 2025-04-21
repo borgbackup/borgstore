@@ -8,6 +8,7 @@ from . import key, list_store_names, list_store_names_sorted
 from .test_backends import get_posixfs_test_backend  # noqa
 from .test_backends import get_sftp_test_backend, sftp_is_available  # noqa
 from .test_backends import get_rclone_test_backend, rclone_is_available  # noqa
+from .test_backends import get_s3_test_backend, s3_is_available  # noqa
 
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo
@@ -38,6 +39,15 @@ def sftp_store_created():
 @pytest.fixture()
 def rclone_store_created():
     store = Store(backend=get_rclone_test_backend(), levels=LEVELS_CONFIG)
+    store.create()
+    try:
+        yield store
+    finally:
+        store.destroy()
+
+@pytest.fixture()
+def s3_store_created():
+    store = Store(backend=get_s3_test_backend(), levels=LEVELS_CONFIG)
     store.create()
     try:
         yield store
@@ -109,6 +119,20 @@ def test_scalability_big_values_rclone(rclone_store_created):
     ns = "zero"
     value = b"x" * 2**20
     with rclone_store_created as store:
+        keys = [key(i) for i in range(count)]
+        for k in keys:
+            store.store(ns + "/" + k, value)
+        for k in keys:
+            assert store.load(ns + "/" + k) == value
+        assert list_store_names(store, ns) == keys
+
+
+@pytest.mark.skipif(not s3_is_available, reason="s3 is not available")
+def test_scalability_big_values_s3(s3_store_created):
+    count = 10
+    ns = "zero"
+    value = b"x" * 2**20
+    with s3_store_created as store:
         keys = [key(i) for i in range(count)]
         for k in keys:
             store.store(ns + "/" + k, value)

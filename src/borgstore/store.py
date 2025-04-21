@@ -21,6 +21,7 @@ from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid  
 from .backends.posixfs import get_file_backend
 from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
+from .backends.s3 import get_s3_backend
 from .constants import DEL_SUFFIX
 
 
@@ -35,6 +36,10 @@ def get_backend(url):
         return backend
 
     backend = get_rclone_backend(url)
+    if backend is not None:
+        return backend
+
+    backend = get_s3_backend(url)
     if backend is not None:
         return backend
 
