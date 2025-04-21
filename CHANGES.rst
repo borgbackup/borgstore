@@ -1,8 +1,8 @@
 ChangeLog
 =========
 
-Version 0.2.0 (not released yet)
---------------------------------
+Version 0.2.0 2025-04-21
+------------------------
 
 Breaking changes:
 
@@ -13,6 +13,7 @@ Breaking changes:
 
 New features:
 
+- new s3/b2 backend that uses the boto3 library, #96
 - posixfs/sftp: create missing parent dirs of the base path
 - rclone: add a way to specify the path to the rclone binary for custom installations
 
