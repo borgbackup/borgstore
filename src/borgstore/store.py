@@ -8,9 +8,11 @@ Store internally uses a backend to store k/v data and adds some functionality:
 - recursive .list method
 - soft deletion
 """
+
 from binascii import hexlify
 from collections import Counter
 from contextlib import contextmanager
+import logging
 import os
 import time
 from typing import Iterator, Optional
@@ -23,6 +25,8 @@ from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
 from .backends.s3 import get_s3_backend
 from .constants import DEL_SUFFIX
+
+logger = logging.getLogger(__name__)
 
 
 def get_backend(url):
@@ -118,7 +122,7 @@ class Store:
         self.backend.close()
 
     @contextmanager
-    def _stats_updater(self, key):
+    def _stats_updater(self, key, msg):
         """update call counters and overall times, also emulate latency and bandwidth"""
         # do not use this in generators!
         volume_before = self._stats_get_volume(key)
@@ -132,8 +136,10 @@ class Store:
         if remaining_time > 0.0:
             time.sleep(remaining_time)
         end = time.perf_counter_ns()
+        overall_time = end - start
         self._stats[f"{key}_calls"] += 1
-        self._stats[f"{key}_time"] += end - start
+        self._stats[f"{key}_time"] += overall_time
+        logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
 
     def _stats_update_volume(self, key, amount):
         self._stats[f"{key}_volume"] += amount
@@ -196,11 +202,11 @@ class Store:
         return nested_name
 
     def info(self, name: str, *, deleted=False) -> ItemInfo:
-        with self._stats_updater("info"):
+        with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
             return self.backend.info(self.find(name, deleted=deleted))
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
-        with self._stats_updater("load"):
+        with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             result = self.backend.load(self.find(name, deleted=deleted), size=size, offset=offset)
             self._stats_update_volume("load", len(result))
             return result
@@ -209,7 +215,7 @@ class Store:
         # note: using .find here will:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
-        with self._stats_updater("store"):
+        with self._stats_updater("store", f"store({name!r})"):
             self.backend.store(self.find(name), value)
             self._stats_update_volume("store", len(value))
 
@@ -219,7 +225,7 @@ class Store:
 
         See also .move(name, delete=True) for "soft" deletion.
         """
-        with self._stats_updater("delete"):
+        with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
             self.backend.delete(self.find(name, deleted=deleted))
 
     def move(
@@ -236,22 +242,26 @@ class Store:
             # use case: keep name, but soft "delete" the item
             nested_name = self.find(name, deleted=False)
             nested_new_name = nested_name + DEL_SUFFIX
+            msg = f"soft_delete({name!r}, deleted={deleted})"
         elif undelete:
             # use case: keep name, undelete a previously soft "deleted" item
             nested_name = self.find(name, deleted=True)
             nested_new_name = nested_name.removesuffix(DEL_SUFFIX)
+            msg = f"soft_undelete({name!r}, deleted={deleted})"
         elif change_level:
             # use case: keep name, changing to another nesting level
             suffix = DEL_SUFFIX if deleted else None
             nested_name = self.find(name, deleted=deleted)
             nested_new_name = nest(name, self._get_levels(name)[-1], add_suffix=suffix)
+            msg = f"change_level({name!r}, deleted={deleted})"
         else:
             # generic use (be careful!)
             if not new_name:
                 raise ValueError("generic move needs new_name to be given.")
             nested_name = self.find(name, deleted=deleted)
             nested_new_name = self.find(new_name, deleted=deleted)
-        with self._stats_updater("move"):
+            msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
+        with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
             self.backend.move(nested_name, nested_new_name)
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
@@ -264,8 +274,17 @@ class Store:
         backend.list giving us sorted names implies store.list is also sorted, if all items are stored on same level.
         """
         # we need this wrapper due to the recursion - we only want to increment list_calls once:
+        logger.debug(f"borgstore: list_start({name!r}, deleted={deleted})")
         self._stats["list_calls"] += 1
-        yield from self._list(name, deleted=deleted)
+        count = 0
+        try:
+            for info in self._list(name, deleted=deleted):
+                count += 1
+                yield info
+        finally:
+            # note: as this is a generator, we do not measure the execution time because
+            # that would include the time needed by the caller to process the infos.
+            logger.debug(f"borgstore: list_end({name!r}, deleted={deleted}) -> {count}")
 
     def _list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         # as the backend.list method only supports non-recursive listing and

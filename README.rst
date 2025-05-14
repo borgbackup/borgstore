@@ -56,6 +56,8 @@ API can be much simpler:
   [us]) and lower bandwidth (via BORGSTORE_BANDWIDTH [bit/s]) than what is
   actually provided by the backend.
 
+Store operations (and per-op timing and volume) are logged at DEBUG log level.
+
 Automatic Nesting
 -----------------
 
