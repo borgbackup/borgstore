@@ -20,7 +20,7 @@ from typing import Iterator, Optional
 from .utils.nesting import nest
 from .backends._base import ItemInfo, BackendBase
 from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid  # noqa
-from .backends.posixfs import get_file_backend
+from .backends.posixfs import get_file_backend, PosixFS
 from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
 from .backends.s3 import get_s3_backend
@@ -49,7 +49,13 @@ def get_backend(url):
 
 
 class Store:
-    def __init__(self, url: Optional[str] = None, backend: Optional[BackendBase] = None, levels: Optional[dict] = None):
+    def __init__(
+        self,
+        url: Optional[str] = None,
+        backend: Optional[BackendBase] = None,
+        levels: Optional[dict] = None,
+        permissions: Optional[dict] = None,
+    ):
         self.url = url
         if backend is None and url is not None:
             backend = get_backend(url)
@@ -59,6 +65,11 @@ class Store:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
         self.set_levels(levels)
+        # the permissions system is only implemented in PosixFS, mainly to support easy application testing
+        # with stores with different permission setups, e.g. read-only, no-delete or full permissions.
+        # in production, such permissions need to be enforced server-side.
+        if permissions is not None and isinstance(backend, PosixFS):
+            backend.permissions = permissions
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
         self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us] -> [s]
