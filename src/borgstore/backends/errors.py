@@ -33,3 +33,7 @@ class BackendMustBeOpen(BackendError):
 
 class ObjectNotFound(BackendError):
     """Object not found."""
+
+
+class PermissionDenied(BackendError):
+    """Permission denied for the requested operation."""
