@@ -37,7 +37,7 @@ def get_file_backend(url):
         (?P<path>(/.*))  # path must be an absolute path. 3rd slash is separator AND part of the path.
     """
     if sys.platform in ("win32", "msys", "cygwin"):
-        url = url.replace("\\", "/")# Normalize backslashes to forward slashes in the URL path portion
+        url = url.replace("\\", "/")# Normalise backslashes to forward slashes in the URL path portion
         m = re.match(windows_file_regex, url, re.VERBOSE)
         if m:
             return PosixFS(path=m["drive"]+m["path"])
@@ -46,7 +46,6 @@ def get_file_backend(url):
         return PosixFS(path=m["path"])
 
     raise BackendError("invalid file:// URL format")
-
 
 class PosixFS(BackendBase):
     # PosixFS implementation supports precreate = True as well as = False.
