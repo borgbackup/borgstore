@@ -28,7 +28,8 @@ def get_file_backend(url):
     # - the caller is responsible to give an absolute path.
     # - windows: see there: https://en.wikipedia.org/wiki/File_URI_scheme
     windows_file_regex = r"""
-        file://  # protocol and empty or single host slash
+        file://  # only empty host part is supported.
+        /  # 3rd slash is separator ONLY, not part of the path.
         (/?)(?P<drive_and_path>([a-zA-Z]:/.*))  # path must be an absolute path.
     """
     file_regex = r"""
