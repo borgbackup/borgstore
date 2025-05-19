@@ -27,7 +27,6 @@ def get_file_backend(url):
     #   as the separator between the host and the path part.
     # - the caller is responsible to give an absolute path.
     # - windows: see there: https://en.wikipedia.org/wiki/File_URI_scheme
-    print(url)
     windows_file_regex = r"""
         file://  # protocol and empty or single host slash
         (/?)(?P<drive>[a-zA-Z]:)  # Drive letter
@@ -38,14 +37,12 @@ def get_file_backend(url):
         (?P<path>(/.*))  # path must be an absolute path. 3rd slash is separator AND part of the path.
     """
     if sys.platform in ("win32", "msys", "cygwin"):
-        print(sys.platform)        
         url = url.replace("\\", "/")# Normalize backslashes to forward slashes in the URL path portion
         m = re.match(windows_file_regex, url, re.VERBOSE)
         if m:
             return PosixFS(path=m["drive"]+m["path"])
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
-        print("unix success")
         return PosixFS(path=m["path"])
 
     raise BackendError("invalid file:// URL format")
