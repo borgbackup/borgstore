@@ -29,8 +29,7 @@ def get_file_backend(url):
     # - windows: see there: https://en.wikipedia.org/wiki/File_URI_scheme
     windows_file_regex = r"""
         file://  # protocol and empty or single host slash
-        (/?)(?P<drive>[a-zA-Z]:)  # Drive letter
-        (?P<path>/.*)  # Rest of path, starting with slash
+        (/?)(?P<drive_and_path>([a-zA-Z]:/.*))  # path must be an absolute path.
     """
     file_regex = r"""
         file://  # only empty host part is supported.
@@ -40,7 +39,7 @@ def get_file_backend(url):
         url = url.replace("\\", "/")# Normalise backslashes to forward slashes in the URL path portion
         m = re.match(windows_file_regex, url, re.VERBOSE)
         if m:
-            return PosixFS(path=m["drive"]+m["path"])
+            return PosixFS(path=m["drive_and_path"])
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
         return PosixFS(path=m["path"])
