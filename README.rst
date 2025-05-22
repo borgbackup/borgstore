@@ -113,6 +113,8 @@ Use storage on a local POSIX filesystem:
 - it is the caller's task to create an absolute fs path from a relative one.
 - namespaces: directories
 - values: in key-named files
+- a simple permissions system that raises ``PermissionDenied`` if an access
+  is not permitted by the posixfs backend configuration.
 
 sftp
 ~~~~
