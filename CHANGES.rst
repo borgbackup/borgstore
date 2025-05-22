@@ -1,6 +1,26 @@
 ChangeLog
 =========
 
+Version 0.3.0 2025-05-22
+------------------------
+
+New features:
+
+- posixfs: add a permissions system, #105
+- Store: add permissions argument (only supported by posixfs)
+- Store: add logging for Store ops, #104. It logs:
+
+  - operation
+  - name(s)
+  - params like deleted
+  - size and timing
+
+  Please note:
+
+  - logging is done at debug level, so log output is not visible with a default logger.
+  - borgstore does not configure logging, that is the task of the application that uses borgstore.
+
+
 Version 0.2.0 2025-04-21
 ------------------------
 
