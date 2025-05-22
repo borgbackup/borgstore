@@ -152,7 +152,7 @@ Use storage on an S3-compliant cloud service:
 - URL: ``(s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path``
 
   The underlying backend is based on ``boto3``, so all standard boto3 authentication methods are supported:
-  
+
   - provide a named profile (from your boto3 config),
   - include access key ID and secret in the URL,
   - or use default credentials (e.g., environment variables, IAM roles, etc.).
@@ -221,7 +221,7 @@ like e.g. for upgrading an existing store's data to a new release.**
 There are tests and they succeed for the basic functionality, so some of the
 stuff is already working well.
 
-There might be missing features or optimization potential, feedback welcome!
+There might be missing features or optimization potential, feedback is welcome!
 
 There are a lot of possible, but still missing backends. If you want to create
 and support one: pull requests are welcome.
