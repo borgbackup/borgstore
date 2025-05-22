@@ -112,6 +112,8 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
+- A simple permissions system that raises ``PermissionDenied`` if an access
+  is not permitted by the posixfs backend configuration.
 
 sftp
 ~~~~
