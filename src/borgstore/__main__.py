@@ -2,11 +2,11 @@
 Demo for BorgStore
 ==================
 
-Usage:  python -m borgstore <borgstore_storage_url>
+Usage: python -m borgstore <borgstore_storage_url>
 
-E.g.:   python -m borgstore file:///tmp/borgstore_storage
+For example: python -m borgstore file:///tmp/borgstore_storage
 
-Please be careful: the given storage will be created, used and **completely deleted**!
+Please be careful: the given storage will be created, used, and **completely deleted**!
 """
 
 
@@ -27,8 +27,8 @@ def run_demo(storage_url):
     try:
         store.create()
     except FileExistsError:
-        # currently, we only have file:// storages, so this should be fine.
-        print("Error: you must not give an existing directory.")
+        # Currently, we only have file:// storages, so this should be fine.
+        print("Error: do not specify an existing directory.")
         return
 
     with store:
@@ -52,7 +52,7 @@ def run_demo(storage_url):
         data2 = b"more arbitrary binary data. " * 2
         key2 = id_key(data2)
         store.store(key2, data2)
-        print(f"Soft deleting item {key2} ...")
+        print(f"Soft-deleting item {key2} ...")
         store.move(key2, delete=True)
 
         print(f"Listing data namespace contents: {list(store.list('data', deleted=False))}")
@@ -60,7 +60,7 @@ def run_demo(storage_url):
 
         print(f"Stats: {store.stats}")
 
-    answer = input("After you've inspected the storage, enter DESTROY to destroy the storage, anything else to abort: ")
+    answer = input("After you've inspected the storage, enter DESTROY to destroy the storage; anything else aborts: ")
     if answer == "DESTROY":
         store.destroy()
 

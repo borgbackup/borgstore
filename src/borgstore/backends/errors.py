@@ -12,7 +12,7 @@ class BackendURLInvalid(BackendError):
 
 
 class NoBackendGiven(BackendError):
-    """Raised when trying to create a store and not giving a backend nor a URL."""
+    """Raised when trying to create a store and giving neither a backend nor a URL."""
 
 
 class BackendAlreadyExists(BackendError):

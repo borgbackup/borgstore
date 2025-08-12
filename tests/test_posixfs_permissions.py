@@ -1,8 +1,8 @@
-# PosixFS implements a special .permissions instance attribute that has a map
-# from names (paths) [str] to granted permissions [str].
-# This can be used to test software which uses borgstore to check whether it
-# behaves well in scenarios with different permissions (like read-only, object
-# deletion disallowed or all permissions granted).
+# PosixFS implements a special .permissions instance attribute that maps
+# names (paths) [str] to granted permissions [str].
+# This can be used to test software that uses borgstore to check whether it
+# behaves well in scenarios with different permissions (e.g., read-only, object
+# deletion disallowed, or all permissions granted).
 
 import pytest
 
@@ -14,7 +14,7 @@ DATA1, DATA2 = b"data1", b"data2"
 
 
 def test_full_permissions(tmp_path):
-    # all permissions granted, recursively.
+    # All permissions granted, recursively.
     fs = PosixFS(path=tmp_path, permissions={"": "lrwWD"})
     # w
     fs.create()
@@ -27,8 +27,8 @@ def test_full_permissions(tmp_path):
     # r
     assert fs.load("dir/file") == DATA2
     # l
-    list(fs.list(""))  # should not raise exception
-    list(fs.list("dir"))  # should not raise exception
+    list(fs.list(""))  # should not raise an exception
+    list(fs.list("dir"))  # should not raise an exception
     # r and w
     fs.move("dir/file", "dir/moved_file")
     # D
@@ -42,7 +42,7 @@ def test_readonly_permissions(tmp_path):
     fs.open()
     fs.mkdir("dir")
     fs.store("dir/file", DATA1)
-    # read-only permissions granted, recursively.
+    # Read-only permissions granted, recursively.
     fs.permissions = {"": "lr"}
     # w denied
     with pytest.raises(PermissionDenied):
@@ -53,8 +53,8 @@ def test_readonly_permissions(tmp_path):
     # r
     assert fs.load("dir/file") == DATA1
     # l
-    list(fs.list(""))  # should not raise exception
-    list(fs.list("dir"))  # should not raise exception
+    list(fs.list(""))  # should not raise an exception
+    list(fs.list("dir"))  # should not raise an exception
     # D denied
     with pytest.raises(PermissionDenied):
         fs.delete("dir/file")
@@ -83,8 +83,8 @@ def test_nodelete_permissions(tmp_path):
     # r
     assert fs.load("dir/file") == DATA1
     # l
-    list(fs.list(""))  # should not raise exception
-    list(fs.list("dir"))  # should not raise exception
+    list(fs.list(""))  # should not raise an exception
+    list(fs.list("dir"))  # should not raise an exception
     # D denied
     with pytest.raises(PermissionDenied):
         fs.delete("dir/file")

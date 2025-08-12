@@ -1,3 +1,6 @@
+"""
+BorgStore backend for S3-compatible services (including Backblaze B2) using boto3.
+"""
 try:
     import boto3
     from botocore.client import Config
@@ -16,6 +19,11 @@ from .errors import ObjectNotFound
 
 
 def get_s3_backend(url: str):
+    """Get S3 backend from URL.
+
+    Supports URLs of the form:
+    (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
+    """
     if boto3 is None:
         return None
 
@@ -64,6 +72,8 @@ def get_s3_backend(url: str):
 
 
 class S3(BackendBase):
+    """BorgStore backend for S3 and Backblaze B2 (via boto3)."""
+
     def __init__(self, bucket: str, path: str, is_b2: bool, profile: Optional[str] = None,
                  access_key_id: Optional[str] = None, access_key_secret: Optional[str] = None,
                  endpoint_url: Optional[str] = None):

@@ -1,11 +1,11 @@
 """
-Key/Value Store Implementation.
+Key/value store implementation.
 
-Store internally uses a backend to store k/v data and adds some functionality:
+The Store uses a backend to store key/value data and adds some functionality:
 
 - backend creation from a URL
 - configurable nesting
-- recursive .list method
+- recursive list method
 - soft deletion
 """
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_backend(url):
-    """parse backend URL and return a backend instance (or None)"""
+    """Parse backend URL and return a backend instance (or None)."""
     backend = get_file_backend(url)
     if backend is not None:
         return backend
@@ -161,16 +161,16 @@ class Store:
     @property
     def stats(self):
         """
-        return statistics like method call counters, overall time [ns], overall data volume, overall throughput.
+        Return statistics such as method call counters, overall time [s], overall data volume, and overall throughput.
 
-        please note that the stats values only consider what is seen on the Store api:
+        Please note that the stats values only consider what is seen on the Store API:
 
-        - there might be additional time spent by the caller, outside of Store, thus:
+        - There might be additional time spent by the caller, outside of Store, thus:
 
-          - real time is longer.
-          - real throughput is lower.
-        - there are some overheads not accounted for, e.g. the volume only adds up the data size of load and store.
-        - write buffering or cached reads might give a wrong impression.
+          - Real time is longer.
+          - Real throughput is lower.
+        - There are some overheads not accounted for, e.g., the volume only adds up the data size of load and store.
+        - Write buffering or cached reads might give a wrong impression.
         """
         st = dict(self._stats)  # copy Counter -> generic dict
         for key in "info", "load", "store", "delete", "move", "list":
@@ -185,7 +185,7 @@ class Store:
         return st
 
     def _get_levels(self, name):
-        """get levels from configuration depending on namespace"""
+        """Get levels from the configuration depending on the namespace."""
         for namespace, levels in self.levels:
             if name.startswith(namespace):
                 return levels
@@ -268,7 +268,7 @@ class Store:
         else:
             # generic use (be careful!)
             if not new_name:
-                raise ValueError("generic move needs new_name to be given.")
+                raise ValueError("Generic move requires new_name to be given.")
             nested_name = self.find(name, deleted=deleted)
             nested_new_name = self.find(new_name, deleted=deleted)
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
@@ -279,10 +279,11 @@ class Store:
         """
         List all names in the namespace <name>.
 
-        If deleted is False (default), only normal (not soft deleted) items are yielded.
-        If deleted is True, only soft deleted items are yielded.
+        If deleted is False (default), only non-deleted items are yielded.
+        If deleted is True, only soft-deleted items are yielded.
 
-        backend.list giving us sorted names implies store.list is also sorted, if all items are stored on same level.
+        backend.list giving us sorted names implies Store.list is also sorted,
+        if all items are stored on the same level.
         """
         # we need this wrapper due to the recursion - we only want to increment list_calls once:
         logger.debug(f"borgstore: list_start({name!r}, deleted={deleted})")
