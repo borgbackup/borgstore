@@ -1,5 +1,5 @@
 """
-Filesystem based backend implementation - uses files in directories below a base path.
+Filesystem-based backend implementation - uses files in directories below a base path.
 """
 
 import os
@@ -20,13 +20,13 @@ def get_file_backend(url):
     # file:///absolute/path
     # notes:
     # - we only support **local** fs **absolute** paths.
-    # - there is no such thing as a "relative path" local fs file: url
-    # - the general url syntax is proto://host/path
+    # - there is no such thing as a "relative path" local fs file: URL
+    # - the general URL syntax is proto://host/path
     # - // introduces the host part. it is empty here, meaning localhost / local fs.
     # - the third slash is NOT optional, it is the start of an absolute path as well
     #   as the separator between the host and the path part.
     # - the caller is responsible to give an absolute path.
-    # - windows: see there: https://en.wikipedia.org/wiki/File_URI_scheme
+    # - Windows: see: https://en.wikipedia.org/wiki/File_URI_scheme
     windows_file_regex = r"""
         file://  # only empty host part is supported.
         /  # 3rd slash is separator ONLY, not part of the path.

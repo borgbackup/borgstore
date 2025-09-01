@@ -1,5 +1,5 @@
 """
-Testing for the nesting code.
+Tests for the nesting code.
 """
 
 import pytest
@@ -56,7 +56,7 @@ def test_unnest(key, base, deleted, nested_key):
 @pytest.mark.parametrize(
     "key,base,nested_key",
     [
-        # does not start with base
+        # Does not start with the base.
         ("data/12345678", "data", "data_xxx/12/12345678"),
         ("data/12345678", "data", "dat/12/34/12345678"),
     ],

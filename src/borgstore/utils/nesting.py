@@ -1,30 +1,30 @@
 """
-Nest / un-nest names to address directory scalability issues and deal with suffix of deleted items.
+Nest/un-nest names to address directory scalability issues and handle the suffix for deleted items.
 
-Many directory implementations can't cope well with gazillions of entries, so
-we introduce intermediate directories to lower the amount of entries per directory.
+Many filesystem directory implementations do not cope well with extremely large numbers of entries, so
+we introduce intermediate directories to reduce the number of entries per directory.
 
-The name is expected to have the key as the last element, like:
+The name is expected to have the key as the last element, for example:
 
     name = "namespace/0123456789abcdef"  # often, the key is hex(hash(content))
 
-As we can have a huge amount of keys, we could nest 2 levels deep:
+As we can have a huge number of keys, we could nest 2 levels deep:
 
     nested_name = nest(name, 2)
     nested_name == "namespace/01/23/0123456789abcdef"
 
-Note that the final element is the **full** key - we assume that this is better to deal with in case
-of errors (like a fs issue and stuff being pushed to lost+found) and also easier to deal with (e.g. the
-directory listing directly gives keys without needing to reassemble the full key from parent dirs and
-partial key). Also, a sorted directory list would be same order as a sorted key list.
+Note that the final element is the full key — this is better to deal with in case
+of errors (for example, a filesystem issue and items being pushed to lost+found) and also easier to handle (e.g., a
+directory listing directly yields keys without needing to reassemble the full key from parent directories and
+partial keys). Also, a sorted directory listing has the same order as a sorted key list.
 
-    name = unnest(nested_name, namespace="namespace")  # namespace with a final slash is also supported
+    name = unnest(nested_name, namespace="namespace")  # a namespace with a final slash is also supported
     name == "namespace/0123456789abcdef"
 
 Notes:
-- it works the same way without a namespace, but guess one always wants to use a namespace.
-- always use nest / unnest, even if levels == 0 are desired as it also does some checks and
-  cares for adding / removing a suffix.
+- It works the same way without a namespace, but we recommend always using a namespace.
+- Always use nest/unnest, even if levels == 0 are desired, as they also perform some checks and
+  handle adding/removing a suffix.
 """
 
 from typing import Optional

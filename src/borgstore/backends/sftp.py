@@ -1,5 +1,5 @@
 """
-SFTP based backend implementation - on a sftp server, use files in directories below a base path.
+SFTP-based backend implementation — on an SFTP server, uses files in directories below a base path.
 """
 
 from pathlib import Path
@@ -20,12 +20,13 @@ from ..constants import TMP_SUFFIX
 
 
 def get_sftp_backend(url):
+    """Get SFTP backend from URL."""
     # sftp://username@hostname:22/path
-    # note:
-    # - username and port optional
-    # - host must be a hostname (not IP)
-    # - must give a path, default is a relative path (usually relative to user's home dir -
-    #   this is so that the sftp server admin can move stuff around without the user needing to know).
+    # Notes:
+    # - username and port are optional
+    # - host must be a hostname (not an IP address)
+    # - you must provide a path; by default it is a relative path (usually relative to the user's home directory —
+    #   this allows the SFTP server admin to move things without the user needing to know).
     # - giving an absolute path is also possible: sftp://username@hostname:22//home/username/borgstore
     sftp_regex = r"""
         sftp://
@@ -40,6 +41,7 @@ def get_sftp_backend(url):
 
 
 class Sftp(BackendBase):
+    """BorgStore backend for SFTP."""
     # Sftp implementation supports precreate = True as well as = False.
     precreate_dirs: bool = False
 
@@ -53,7 +55,7 @@ class Sftp(BackendBase):
             raise BackendError("sftp backend unavailable: could not import paramiko!")
 
     def _get_host_config_from_file(self, path: str, hostname: str):
-        """lookup the configuration for hostname in path (ssh config file)"""
+        """Look up the configuration for hostname in path (SSH config file)."""
         config_path = Path(path).expanduser()
         try:
             ssh_config = paramiko.SSHConfig.from_path(config_path)
@@ -63,30 +65,30 @@ class Sftp(BackendBase):
             return ssh_config.lookup(hostname)
 
     def _get_host_config(self):
-        """assemble all given and configured host config values"""
+        """Assemble all provided and configured host configuration values."""
         host_config = paramiko.SSHConfigDict()
         # self.hostname might be an alias/shortcut (with real hostname given in configuration),
         # but there might be also nothing in the configs at all for self.hostname:
         host_config["hostname"] = self.hostname
-        # first process system-wide ssh config, then override with user ssh config:
+        # First process system-wide SSH config, then override with user SSH config:
         host_config.update(self._get_host_config_from_file("/etc/ssh/ssh_config", self.hostname))
-        # note: no support yet for /etc/ssh/ssh_config.d/*
+        # Note: no support yet for /etc/ssh/ssh_config.d/*
         host_config.update(self._get_host_config_from_file("~/.ssh/config", self.hostname))
-        # now override configured values with given values
+        # Now override configured values with provided values
         if self.username is not None:
             host_config.update({"user": self.username})
         if self.port != 0:
             host_config.update({"port": self.port})
-        # make sure port is present and is an int
+        # Make sure port is present and is an int
         host_config["port"] = int(host_config.get("port") or 22)
         return host_config
 
     def _connect(self):
         ssh = paramiko.SSHClient()
-        # note: we do not deal with unknown hosts and ssh.set_missing_host_key_policy here,
-        # the user shall just make "first contact" to any new host using ssh or sftp cli command
+        # Note: we do not deal with unknown hosts and ssh.set_missing_host_key_policy here.
+        # The user should make the first contact to any new host using the ssh or sftp CLI command
         # and interactively verify remote host fingerprints.
-        ssh.load_system_host_keys()  # this is documented to load the USER's known_hosts file
+        ssh.load_system_host_keys()  # This is documented to load the user's known_hosts file
         host_config = self._get_host_config()
         ssh.connect(
             hostname=host_config["hostname"],
@@ -106,12 +108,12 @@ class Sftp(BackendBase):
             raise BackendMustNotBeOpen()
         self._connect()
         try:
-            # we accept an already existing empty directory and we also optionally create
-            # any missing parent dirs. the latter is important for repository hosters that
-            # only offer limited access to their storage (e.g. only via borg/borgstore).
-            # also, it is simpler than requiring users to create parent dirs separately.
+            # We accept an already existing empty directory and we also optionally create
+            # any missing parent dirs. The latter is important for repository hosters that
+            # only offer limited access to their storage (e.g., only via borg/borgstore).
+            # It is also simpler than requiring users to create parent dirs separately.
             self._mkdir(self.base_path, exist_ok=True, parents=True)
-            # avoid that users create a mess by using non-empty directories:
+            # Prevent users from creating a mess by using non-empty directories:
             contents = list(self.client.listdir(self.base_path))
             if contents:
                 raise BackendAlreadyExists(f"sftp storage base path is not empty: {self.base_path}")

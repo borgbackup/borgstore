@@ -1,11 +1,11 @@
-"""some constant definitions"""
+"""Constants used by BorgStore."""
 
-# namespace that needs to be given to list from the root of the storage:
+# Namespace to pass to list() for the storage root:
 ROOTNS = ""
 
-# filename suffixes used for special purposes
-TMP_SUFFIX = ".tmp"  # temporary file while being uploaded / written
-DEL_SUFFIX = ".del"  # "soft deleted" item, undelete possible
+# Filename suffixes used for special purposes
+TMP_SUFFIX = ".tmp"  # Temporary file while being uploaded/written
+DEL_SUFFIX = ".del"  # "Soft-deleted" item; can be undeleted
 
-# max name length (not precise, suffixes might be added!)
-MAX_NAME_LENGTH = 100  # being rather conservative here to improve portability between backends and platforms
+# Maximum name length (not precise; suffixes might be added!)
+MAX_NAME_LENGTH = 100  # Being rather conservative here to improve portability between backends and platforms

@@ -1,5 +1,5 @@
 """
-Generic testing for the misc. backend implementations.
+Generic tests for the backend implementations.
 """
 
 import os
@@ -52,7 +52,7 @@ def get_sftp_test_backend():
 
 
 def check_sftp_available():
-    """in some test environments, get_sftp_backend() does not result in a working sftp backend"""
+    """In some test environments, get_sftp_backend() does not result in a working SFTP backend."""
     try:
         be = get_sftp_test_backend()
         be.create()  # first sftp activity happens here
@@ -77,7 +77,7 @@ def get_rclone_test_backend():
 
 
 def check_rclone_available():
-    """in some test environments, get_rclone_backend() does not result in a working rclone backend"""
+    """In some test environments, get_rclone_backend() does not result in a working rclone backend."""
     try:
         be = get_rclone_test_backend()
         be.create()  # first rclone activity happens here
@@ -101,7 +101,7 @@ def get_s3_test_backend():
 
 
 def check_s3_available():
-    """in some test environments, get_s3_backend() does not result in a working s3 backend"""
+    """In some test environments, get_s3_backend() does not result in a working S3 backend."""
     try:
         be = get_s3_test_backend()
         be.create()  # first s3 activity happens here
