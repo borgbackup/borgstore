@@ -38,7 +38,7 @@ Store Operations
 ----------------
 
 The high-level Store API implementation transparently deals with nesting and
-soft deletion, so the caller doesn't have to care much about that, and the backend
+soft deletion, so the caller doesn't need to care much about that, and the backend
 API can be much simpler:
 
 - create/destroy: initialize or remove the whole store.
@@ -49,7 +49,7 @@ API can be much simpler:
   an offset and/or size are supported.
 - info: get information about an item via its key (exists, size, ...).
 - delete: immediately remove an item from the store (given its key).
-- move: implements rename, soft delete/undelete, and moving to the current
+- move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
 - stats: API call counters, time spent in API methods, data volume/throughput.
 - latency/bandwidth emulator: can emulate higher latency (via BORGSTORE_LATENCY
@@ -81,18 +81,18 @@ namespace at the same time.
 
 When using nesting depth > 0, the backends assume that keys are hashes
 (contain hex digits) because some backends pre-create the nesting
-directories at initialization time to optimize performance while using the backend.
+directories at initialization time to optimize backend performance.
 
 Soft deletion
 -------------
 
-To soft delete an item (so its value can still be read or it can be
+To soft-delete an item (so its value can still be read or it can be
 undeleted), the store just renames the item, appending ".del" to its name.
 
 Undelete reverses this by removing the ".del" suffix from the name.
 
-Some store operations have a boolean flag "deleted" to choose whether they
-should consider soft-deleted items.
+Some store operations provide a boolean flag "deleted" to control whether they
+consider soft-deleted items.
 
 Backends
 --------
@@ -112,6 +112,8 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
+- A simple permission system that raises ``PermissionDenied`` if access
+  is not permitted by the posixfs backend configuration.
 
 sftp
 ~~~~
@@ -120,15 +122,15 @@ Use storage on an SFTP server:
 
 - URL: ``sftp://user@server:port/relative/path`` (strongly recommended)
 
-  For users' and admins' convenience, mapping the URL path to the server filesystem path
+  For users' and admins' convenience, the mapping of the URL path to the server filesystem path
   depends on the server configuration (home directory, sshd/sftpd config, ...).
   Usually the path is relative to the user's home directory.
 - URL: ``sftp://user@server:port//absolute/path``
 
-  As this uses an absolute path, some things are more difficult:
+  As this uses an absolute path, some things become more difficult:
 
   - A user's configuration might break if a server admin moves a user's home to a new location.
-  - Users must know the full absolute path of the space they have permission to use.
+  - Users must know the full absolute path of the space they are permitted to use.
 - Namespaces: directories
 - Values: in key-named files
 
@@ -148,7 +150,7 @@ s3
 
 Use storage on an S3-compliant cloud service:
 
-- URL: ``(s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path``
+- URL: ``(s3|b2):[profile|(access_key_id:access_key_secret)@][scheme://hostname[:port]]/bucket/path``
 
   The underlying backend is based on ``boto3``, so all standard boto3 authentication methods are supported:
 
@@ -181,7 +183,7 @@ Scalability
   sizes (e.g., more than available memory, more than backend storage limitations,
   etc.). If one deals with very large values, one usually cuts them into
   chunks before storing them in the store.
-- Partial loads improve performance by avoiding a full load if only a part
+- Partial loads improve performance by avoiding a full load if only part
   of the value is needed (e.g., a header with metadata).
 
 Installation
@@ -200,7 +202,7 @@ Install with the ``s3:`` backend (more dependencies)::
 
     pip install "borgstore[s3]"
 
-Please note that ``rclone:`` also supports SFTP or S3 remotes.
+Please note that ``rclone:`` also supports SFTP and S3 remotes.
 
 Want a demo?
 ------------
@@ -217,13 +219,11 @@ State of this project
 **As long as the API is unstable, there will be no data migration tools,
 such as tools for upgrading an existing store's data to a new release.**
 
-There are tests, and they pass for the basic functionality, so some of the
-functionality is already working well.
+There are tests, and they pass for the basic functionality, so some functionality is already working well.
 
 There might be missing features or optimization potential. Feedback is welcome!
 
-There are many possible backends that are still missing. If you want to create
-and support one, pull requests are welcome.
+Many possible backends are still missing. If you want to create and support one, pull requests are welcome.
 
 Borg?
 -----
