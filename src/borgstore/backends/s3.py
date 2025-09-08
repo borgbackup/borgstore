@@ -35,9 +35,12 @@ def get_s3_backend(url: str):
             |
             (?P<access_key_id>[^:@]+):(?P<access_key_secret>[^@]+)  # access key and secret
         )@)?  # optional authentication
-        (?P<schema>[^:/]+)://
-        (?P<hostname>[^:/]+)
-        (:(?P<port>\d+))?/
+        (
+            (?P<schema>[^:/]+)://
+            (?P<hostname>[^:/]+)
+            (:(?P<port>\d+))?
+        )?  # optional endpoint
+        /
         (?P<bucket>[^/]+)/  # bucket name
         (?P<path>.+)  # path
     """
