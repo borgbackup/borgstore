@@ -66,7 +66,35 @@ jobs:
     - name: Install Linux packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y rclone
+        sudo apt-get install -y rclone openssh-server
+    - name: Configure OpenSSH SFTP server (test only)
+      run: |
+        sudo mkdir -p /run/sshd
+        sudo useradd -m -s /bin/bash sftpuser || true
+        # Create SSH key for the CI user and authorize it for sftpuser
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        test -f ~/.ssh/id_ed25519 || ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+        sudo mkdir -p /home/sftpuser/.ssh
+        sudo chmod 700 /home/sftpuser/.ssh
+        sudo cp ~/.ssh/id_ed25519.pub /home/sftpuser/.ssh/authorized_keys
+        sudo chown -R sftpuser:sftpuser /home/sftpuser/.ssh
+        sudo chmod 600 /home/sftpuser/.ssh/authorized_keys
+        # Allow publickey auth and enable Subsystem sftp
+        sudo sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        sudo sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+        if ! grep -q '^Subsystem sftp' /etc/ssh/sshd_config; then echo 'Subsystem sftp /usr/lib/openssh/sftp-server' | sudo tee -a /etc/ssh/sshd_config; fi
+        # Ensure host keys exist to avoid slow generation on first sshd start
+        sudo ssh-keygen -A
+        # Start sshd (listen on default 22 inside runner)
+        sudo /usr/sbin/sshd -D &
+        # Add host key to known_hosts so paramiko trusts it
+        ssh-keyscan -H localhost 127.0.0.1 | tee -a ~/.ssh/known_hosts
+        # Start ssh-agent and add our key so paramiko can use the agent
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_ed25519
+        # Export SFTP test URL for tox via GITHUB_ENV
+        echo "BORGSTORE_TEST_SFTP_URL=sftp://sftpuser@localhost:22/borgstore/temp-store" >> $GITHUB_ENV
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
@@ -75,7 +103,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools
         pip install -r requirements.d/dev.txt
-    - name: Install borgstore
-      run: pip install -ve .
+    - name: Install borgstore (with sftp extra)
+      run: pip install -ve ".[sftp]"
     - name: run tox env
-      run: tox --skip-missing-interpreters
+      run: tox -e sftp
