@@ -112,8 +112,61 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
-- A simple permission system that raises ``PermissionDenied`` if access
-  is not permitted by the posixfs backend configuration.
+- Permissions: This backend can enforce a simple, test-friendly permission system
+  and raises ``PermissionDenied`` if access is not permitted by the configuration.
+
+  You provide a mapping of names (paths) to granted permission letters. Permissions
+  apply to the exact name and all of its descendants (inheritance). If a name is not
+  present in the mapping, its nearest ancestor is consulted, up to the empty name
+  "" (the store root). If no mapping is provided at all, all operations are allowed.
+
+  Permission letters:
+
+  - ``l``: allow listing object names (directory/namespace listing)
+  - ``r``: allow reading objects (contents)
+  - ``w``: allow writing new objects (must not already exist)
+  - ``W``: allow writing objects including overwriting existing objects
+  - ``D``: allow deleting objects
+
+  Operation requirements:
+
+  - create(): requires ``w`` or ``W`` on the store root (``wW``)
+  - destroy(): requires ``D`` on the store root
+  - mkdir(name): requires ``w``
+  - rmdir(name): requires ``w`` or ``D`` (``wD``)
+  - list(name): requires ``l``
+  - info(name): requires ``l`` (``r`` also accepted)
+  - load(name): requires ``r``
+  - store(name, value): requires ``w`` for new objects, ``W`` for overwrites (``wW``)
+  - delete(name): requires ``D``
+  - move(src, dst): requires ``D`` for the source and ``w``/``W`` for the destination
+
+  Examples:
+
+  - Read-only store (recursively): ``permissions = {"": "lr"}``
+  - No-delete, no-overwrite (but allow adding new items): ``permissions = {"": "lrw"}``
+  - Hierarchical rules: only allow listing at root, allow read/write in "dir",
+    but only read for "dir/file":
+
+    ::
+
+        permissions = {
+            "": "l",
+            "dir": "lrw",
+            "dir/file": "r",
+        }
+
+  To use permissions with ``Store`` and ``posixfs``, pass the mapping to Store and it
+  will be handed to the posixfs backend:
+
+  ::
+
+      from borgstore import Store
+      store = Store(url="file:///abs/path", permissions={"": "lrwWD"})
+      store.create()
+      store.open()
+      # ...
+      store.close()
 
 sftp
 ~~~~
