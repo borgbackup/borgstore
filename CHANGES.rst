@@ -1,6 +1,27 @@
 Changelog
 =========
 
+Version x.x.x (not released yet)
+--------------------------------
+
+Bug fixes:
+
+- s3 URL: ensure s3 endpoint is optional
+
+Other changes:
+
+- use a spdx license expression to avoid pip warnings
+- CI:
+
+  - add sftp store testing, #64
+  - add s3 store testing
+- docs:
+
+  - describe the posixfs permissions system
+  - updates, typos and grammar fixes
+  - mention the permissions system of posixfs backend
+
+
 Version 0.3.0 2025-05-22
 ------------------------
 
