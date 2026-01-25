@@ -23,7 +23,7 @@ from ..constants import TMP_SUFFIX
 def get_sftp_backend(url):
     """Get SFTP backend from URL."""
 
-    if not url.startswith("sftp://"):
+    if not url.startswith("sftp:"):
         return None
 
     if paramiko is None:
