@@ -221,7 +221,6 @@ Use storage on an S3-compliant cloud service:
      There is a known issue with some S3-compatible services (e.g., **Backblaze B2**).
      If you encounter problems, try using ``b2:`` instead of ``s3:`` in the URL.
 
-
 - Namespaces: directories
 - Values: in key-named files
 
