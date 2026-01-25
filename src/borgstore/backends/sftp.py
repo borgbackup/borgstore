@@ -26,8 +26,8 @@ def get_sftp_backend(url):
     if not url.startswith("sftp://"):
         return None
 
-    if paramiko is not None:
-        raise DependencyMissing("The SFTP backend requires dependencies. Install it with 'pip install borgstore[sftp]'")
+    if paramiko is None:
+        raise DependencyMissing("The SFTP backend requires dependencies. Install them with: 'pip install borgstore[sftp]'")
 
 
     # sftp://username@hostname:22/path
