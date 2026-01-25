@@ -14,7 +14,7 @@ import urllib.parse
 from borgstore.constants import TMP_SUFFIX
 
 from ._base import BackendBase, ItemInfo, validate_name
-from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
+from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists, DependencyMissing
 from .errors import ObjectNotFound
 
 
@@ -25,6 +25,9 @@ def get_s3_backend(url: str):
     (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     """
     if boto3 is None:
+        if url.startswith("s3:") or url.startswith("b2"):
+            raise DependencyMissing("Backend url seems to be an s3/b2 url but 'boto3' lib is not installed.")
+
         return None
 
     # (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
