@@ -24,11 +24,12 @@ def get_s3_backend(url: str):
     Supports URLs of the form:
     (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     """
-    if boto3 is None:
-        if url.startswith("s3:") or url.startswith("b2"):
-            raise DependencyMissing("Backend url seems to be an s3/b2 url but 'boto3' lib is not installed.")
 
+    if not url.startswith("s3:") and not url.startswith("b2:"):
         return None
+
+    if boto3 is None:
+        raise DependencyMissing("The S3 backend requires dependencies. Install it with 'pip install borgstore[s3]'")
 
     # (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     s3_regex = r"""
