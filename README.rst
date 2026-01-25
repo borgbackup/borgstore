@@ -221,9 +221,6 @@ Use storage on an S3-compliant cloud service:
      There is a known issue with some S3-compatible services (e.g., **Backblaze B2**).
      If you encounter problems, try using ``b2:`` instead of ``s3:`` in the URL.
 
-  .. note::
-
-     You need to install ``boto3`` to be able to use s3/b2 backends. Run ``pip install boto3`` in your venv.
 
 - Namespaces: directories
 - Values: in key-named files

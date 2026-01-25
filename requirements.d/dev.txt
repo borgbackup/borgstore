@@ -3,4 +3,3 @@ tox
 pytest
 build
 twine
-boto3
