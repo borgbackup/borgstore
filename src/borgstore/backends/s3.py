@@ -25,7 +25,7 @@ def get_s3_backend(url: str):
     (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     """
 
-    if not url.startswith("s3:") and not url.startswith("b2:"):
+    if not url.startswith(("s3:", "b2:")):
         return None
 
     if boto3 is None:
