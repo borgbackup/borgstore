@@ -29,7 +29,7 @@ def get_s3_backend(url: str):
         return None
 
     if boto3 is None:
-        raise BackendDoesNotExist("The S3 backend requires dependencies. Install them with 'pip install borgstore[s3]'")
+        raise BackendDoesNotExist("The S3 backend requires dependencies. Install them with: 'pip install borgstore[s3]'")
 
     # (s3|b2):[profile|(access_key_id:access_key_secret)@][schema://hostname[:port]]/bucket/path
     s3_regex = r"""
