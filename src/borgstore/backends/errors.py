@@ -38,5 +38,3 @@ class ObjectNotFound(BackendError):
 class PermissionDenied(BackendError):
     """Permission denied for the requested operation."""
 
-class DependencyMissing(BackendError):
-    """Permission denied for the requested operation."""

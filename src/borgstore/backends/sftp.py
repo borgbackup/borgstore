@@ -14,8 +14,7 @@ except ImportError:
     paramiko = None
 
 from ._base import BackendBase, ItemInfo, validate_name
-from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists, \
-    DependencyMissing
+from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
 from ..constants import TMP_SUFFIX
 
@@ -27,7 +26,7 @@ def get_sftp_backend(url):
         return None
 
     if paramiko is None:
-        raise DependencyMissing("The SFTP backend requires dependencies. Install them with: 'pip install borgstore[sftp]'")
+        raise BackendDoesNotExist("The SFTP backend requires dependencies. Install them with: 'pip install borgstore[sftp]'")
 
 
     # sftp://username@hostname:22/path
