@@ -68,8 +68,8 @@ def get_s3_backend(url: str):
         schema = m["schema"]
         hostname = m["hostname"]
         port = m["port"]
-        bucket = m["bucket"]
-        path = m["path"]
+        bucket = m["bucket"]  # no unquote: all valid bucket characters are URL-safe
+        path = urllib.parse.unquote(m["path"])
 
         endpoint_url = None
         if schema and hostname:
