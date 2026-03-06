@@ -167,8 +167,11 @@ def get_backend_from_fixture(tested_backends, request):
     return request.getfixturevalue(tested_backends)
 
 
-POSIX_ABS_TESTCASES = [("file:///absolute/path", "/absolute/path")]
-WINDOWS_ABS_TESTCASES = [("file:///C:/absolute/path", "C:/absolute/path")]
+POSIX_ABS_TESTCASES = [("file:///absolute/path", "/absolute/path"), ("file:///absolute/my%20path", "/absolute/my path")]
+WINDOWS_ABS_TESTCASES = [
+    ("file:///C:/absolute/path", "C:/absolute/path"),
+    ("file:///C:/absolute/my%20path", "C:/absolute/my path"),
+]
 
 
 @pytest.mark.parametrize("url,path", WINDOWS_ABS_TESTCASES if os.name == "nt" else POSIX_ABS_TESTCASES)
@@ -210,6 +213,8 @@ def test_invalid_or_remote_file_url(url):
         ("sftp://username@hostname:2222//abs/path", "username", "hostname", 2222, "/abs/path"),
         ("sftp://username@hostname//abs/path", "username", "hostname", 0, "/abs/path"),
         ("sftp://hostname//abs/path", None, "hostname", 0, "/abs/path"),
+        ("sftp://username@hostname/rel/my%20path", "username", "hostname", 0, "rel/my path"),
+        ("sftp://username@hostname//abs/my%20path", "username", "hostname", 0, "/abs/my path"),
     ],
 )
 def test_sftp_url(url, username, hostname, port, path):
@@ -219,6 +224,19 @@ def test_sftp_url(url, username, hostname, port, path):
     assert backend.hostname == hostname
     assert backend.port == port  # note: 0 means "not given" (and will usually mean 22 in the end)
     assert backend.base_path == path
+
+
+@pytest.mark.parametrize(
+    "url,bucket,path", [("s3:/bucket/path", "bucket", "path"), ("s3:/bucket/my%20path", "bucket", "my path")]
+)
+def test_s3_url(url, bucket, path):
+    from unittest.mock import patch, MagicMock
+
+    with patch("borgstore.backends.s3.boto3", MagicMock()):
+        backend = get_s3_backend(url)
+    assert isinstance(backend, S3)
+    assert backend.bucket == bucket
+    assert backend.base_path == path + "/"
 
 
 def test_flat(tested_backends, request):
