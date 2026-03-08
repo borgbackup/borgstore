@@ -47,7 +47,7 @@ def get_sftp_backend(url):
     m = re.match(sftp_regex, url, re.VERBOSE)
     if m:
         return Sftp(
-            username=unquote(m["username"]) if m["username"] else m["username"],
+            username=unquote(m["username"]) if m["username"] else None,
             hostname=m["hostname"],
             port=int(m["port"] or "0"),
             path=unquote(m["path"]),
