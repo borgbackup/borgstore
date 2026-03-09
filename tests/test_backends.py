@@ -20,9 +20,9 @@ from borgstore.backends.errors import (
 )
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
-from borgstore.backends.rclone import Rclone, get_rclone_backend
-from borgstore.backends.s3 import S3, get_s3_backend
-from borgstore.constants import ROOTNS, TMP_SUFFIX
+from borgstore.backends.rclone import get_rclone_backend
+from borgstore.backends.s3 import get_s3_backend
+from borgstore.constants import ROOTNS
 
 
 def get_posixfs_test_backend(tmp_path):
@@ -371,8 +371,8 @@ def test_scalability_size(tested_backends, exp, request):
     with get_backend_from_fixture(tested_backends, request) as backend:
         size = 10**exp
         key, value = "key", bytes(size)
-        backend.store("key", value)
-        assert backend.load("key") == value
+        backend.store(key, value)
+        assert backend.load(key) == value
 
 
 def test_load_partial(tested_backends, request):
