@@ -140,15 +140,25 @@ class Sftp(BackendBase):
                     delete_recursive(child)
                 else:
                     self.client.unlink(str(child))
-            self.client.rmdir(str(parent))
+            try:
+                self.client.rmdir(str(parent))
+            except OSError as e:
+                # usually, this is because of missing permissions.
+                if path != self.base_path:
+                    raise e from None
+                # do not raise if we can't remove the base path directory.
+                # .create accepts an already existing base path, thus
+                # .destroy may leave an existing base path behind.
 
         if self.opened:
             raise BackendMustNotBeOpen()
         self._connect()
         try:
+            try:
+                st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
+            except FileNotFoundError:
+                raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}") from None
             delete_recursive(self.base_path)
-        except FileNotFoundError:
-            raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}")
         finally:
             self._disconnect()
 

@@ -111,10 +111,23 @@ class PosixFS(BackendBase):
         if self.opened:
             raise BackendMustNotBeOpen()
         self._check_permission("", "D")
-        try:
-            shutil.rmtree(os.fspath(self.base_path))
-        except FileNotFoundError:
+        if not self.base_path.exists():
             raise BackendDoesNotExist(f"posixfs storage base path does not exist: {self.base_path}")
+
+        def onexc(func, path, exc):
+            # for rmtree, this is called if it can't remove a file or directory.
+            # usually, this is because of missing permissions.
+            if path != os.fspath(self.base_path):
+                raise exc
+            # do not raise if we can't remove the base path directory.
+            # .create accepts an already existing base path, thus
+            # .destroy may leave an existing base path behind.
+
+        def onerror(func, path, excinfo):
+            onexc(func, path, excinfo[1])
+
+        kw = {"onexc": onexc} if sys.version_info >= (3, 12) else {"onerror": onerror}
+        shutil.rmtree(os.fspath(self.base_path), **kw)
 
     def open(self):
         if self.opened:

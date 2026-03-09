@@ -3,7 +3,9 @@ Generic tests for the backend implementations.
 """
 
 import os
+import sys
 from pathlib import Path
+import stat
 
 import pytest
 import tempfile
@@ -23,6 +25,9 @@ from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.backends.rclone import Rclone, get_rclone_backend
 from borgstore.backends.s3 import S3, get_s3_backend
 from borgstore.constants import ROOTNS, TMP_SUFFIX
+
+
+is_win32 = sys.platform == "win32"
 
 
 def get_posixfs_test_backend(tmp_path):
@@ -411,6 +416,40 @@ def test_does_not_exist(tested_backends, request):
         backend.destroy()
     # create the backend again, so the context manager can happily destroy it:
     backend.create()
+
+
+@pytest.mark.skipif(is_win32, reason="test does not support windows")
+def test_posixfs_existing_base_path_parent_readonly(tmp_path):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    base_path = parent / "base_path"
+    base_path.mkdir()
+
+    # Make parent read-only (so base_path cannot be removed).
+    mode = parent.stat().st_mode
+    parent.chmod(mode & ~stat.S_IWUSR)
+
+    try:
+        backend = PosixFS(path=os.fspath(base_path))
+        # posixfs.create shall create fine using the already existing base path.
+        backend.create()
+
+        with backend:
+            backend.store("test", b"data")
+
+        # posixfs.destroy must not raise an exception for the base path.
+        # It should delete "test" (if possible), but it might fail to delete base_path itself.
+        # Our implementation in posixfs.py should handle this.
+        backend.destroy()
+
+        # Verify that base_path still exists because the parent was read-only.
+        assert base_path.exists()
+        # "test" inside base_path should have been removed by rmtree.
+        assert not (base_path / "test").exists()
+
+    finally:
+        # Cleanup: restore permissions to allow tmp_path cleanup
+        parent.chmod(mode)
 
 
 def test_must_be_open(tested_backends, request):
