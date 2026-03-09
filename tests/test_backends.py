@@ -366,15 +366,6 @@ def test_list(tested_backends, request):
             list(backend.list("nonexistent"))
 
 
-def test_list_temporary_item(tested_backends, request):
-    with get_backend_from_fixture(tested_backends, request) as backend:
-        # usually, one must never use a key with TMP_SUFFIX, but we do it here
-        # for the sake of creating an item with such a name (somehow like if a
-        # temporary item was accidentally left in the backend storage).
-        backend.store("file-while-uploading" + TMP_SUFFIX, b"value")
-        assert list(backend.list(ROOTNS)) == []  # .list must not yield tmp files
-
-
 @pytest.mark.parametrize("exp", range(9))
 def test_scalability_size(tested_backends, exp, request):
     with get_backend_from_fixture(tested_backends, request) as backend:

@@ -300,6 +300,10 @@ class Sftp(BackendBase):
             raise ObjectNotFound(name) from None
         else:
             for info in sorted(infos, key=lambda i: i.filename):
-                if not info.filename.endswith(TMP_SUFFIX):
+                try:
+                    validate_name(info.filename)
+                except ValueError:
+                    pass  # that file is likely not from us or is still uploading
+                else:
                     is_dir = stat.S_ISDIR(info.st_mode)
                     yield ItemInfo(name=info.filename, exists=True, size=info.st_size, directory=is_dir)
