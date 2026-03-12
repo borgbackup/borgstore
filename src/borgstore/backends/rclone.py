@@ -62,6 +62,7 @@ def get_rclone_backend(url):
     """
     m = re.match(rclone_regex, url, re.VERBOSE)
     if m:
+        # no URL-unquote here, we just pass through the rclone remote spec "as is"
         return Rclone(path=m["path"])
 
 

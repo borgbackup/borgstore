@@ -3,6 +3,7 @@ SFTP-based backend implementation — on an SFTP server, uses files in directori
 """
 
 from pathlib import Path
+from urllib.parse import unquote
 import random
 import re
 import stat
@@ -45,7 +46,12 @@ def get_sftp_backend(url):
     """
     m = re.match(sftp_regex, url, re.VERBOSE)
     if m:
-        return Sftp(username=m["username"], hostname=m["hostname"], port=int(m["port"] or "0"), path=m["path"])
+        return Sftp(
+            username=unquote(m["username"]) if m["username"] else None,
+            hostname=m["hostname"],
+            port=int(m["port"] or "0"),
+            path=unquote(m["path"]),
+        )
 
 
 class Sftp(BackendBase):
