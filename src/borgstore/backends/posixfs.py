@@ -267,7 +267,11 @@ class PosixFS(BackendBase):
             raise ObjectNotFound(name) from None
         else:
             for p in paths:
-                if not p.name.endswith(TMP_SUFFIX):
+                try:
+                    validate_name(p.name)
+                except ValueError:
+                    pass  # that file is likely not from us or is still uploading
+                else:
                     try:
                         st = p.stat()
                     except FileNotFoundError:

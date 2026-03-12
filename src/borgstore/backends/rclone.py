@@ -21,7 +21,6 @@ from .errors import (
     BackendAlreadyExists,
     ObjectNotFound,
 )
-from ..constants import TMP_SUFFIX
 
 # rclone binary - expected to be on the path
 RCLONE = os.environ.get("RCLONE_BINARY", "rclone")
@@ -281,9 +280,6 @@ class Rclone(BackendBase):
     def list(self, name: str) -> Iterator[ItemInfo]:
         """List the contents of <name>, non-recursively.
 
-        Does not yield TMP_SUFFIX items — usually they are either not finished
-        uploading or they are leftover data from aborted uploads.
-
         The yielded ItemInfos are sorted alphabetically by name.
         """
         validate_name(name)
@@ -293,6 +289,9 @@ class Rclone(BackendBase):
         )
         for item in result["list"]:
             name = item["Name"]
-            if name.endswith(TMP_SUFFIX):
-                continue
-            yield self._to_item_info(name, item)
+            try:
+                validate_name(name)
+            except ValueError:
+                pass  # that file is likely not from us or is still uploading
+            else:
+                yield self._to_item_info(name, item)

@@ -12,8 +12,6 @@ import re
 from typing import Optional
 import urllib.parse
 
-from borgstore.constants import TMP_SUFFIX
-
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
@@ -256,10 +254,13 @@ class S3(BackendBase):
                     obj_name = obj["Key"][len(base_prefix) :]  # Remove base_path prefix
                     if obj_name == "":
                         continue
-                    if obj_name.endswith(TMP_SUFFIX):
-                        continue
-                    start_after = obj["Key"]
-                    yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=False)
+                    try:
+                        validate_name(obj_name)
+                    except ValueError:
+                        pass  # that file is likely not from us or is still uploading
+                    else:
+                        start_after = obj["Key"]
+                        yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=False)
                 for prefix in objects.get("CommonPrefixes", []):
                     dir_name = prefix["Prefix"][len(base_prefix) : -1]  # Remove base_path prefix and trailing slash
                     yield ItemInfo(name=dir_name, exists=True, size=0, directory=True)

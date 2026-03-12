@@ -8,13 +8,16 @@ from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Iterator
 
-from ..constants import MAX_NAME_LENGTH
+from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX
 
 ItemInfo = namedtuple("ItemInfo", "name exists size directory")
 
 
 def validate_name(name):
     """Validate a backend key/name."""
+    # this is used before an object is accepted for storage and
+    # it is also used before a name is returned by list method.
+    # no crap in, no crap out (even if it is not from us).
     if not isinstance(name, str):
         raise TypeError(f"name must be str, but got: {type(name)}")
     # name must not be too long
@@ -38,6 +41,9 @@ def validate_name(name):
     # a key "1234CAFE5678BABE" would address a different item than a key "1234cafe5678babe".
     if name != name.lower():
         raise ValueError(f"name must be lowercase, but got: {name}")
+    if name.endswith(TMP_SUFFIX):
+        # TMP_SUFFIX is used for temporary files internally, e.g. while files are uploading.
+        raise ValueError(f"name must not end with {TMP_SUFFIX}, but got: {name}")
 
 
 class BackendBase(ABC):
