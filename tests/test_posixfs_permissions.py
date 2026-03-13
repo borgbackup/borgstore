@@ -9,7 +9,6 @@ import pytest
 from borgstore.backends.posixfs import PosixFS
 from borgstore.backends.errors import PermissionDenied
 
-
 DATA1, DATA2 = b"data1", b"data2"
 
 
