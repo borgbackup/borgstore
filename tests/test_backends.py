@@ -23,7 +23,7 @@ from borgstore.backends.errors import (
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.backends.rclone import get_rclone_backend
-from borgstore.backends.s3 import get_s3_backend
+from borgstore.backends.s3 import S3, get_s3_backend
 from borgstore.constants import ROOTNS
 
 
