@@ -26,7 +26,6 @@ from borgstore.backends.rclone import get_rclone_backend
 from borgstore.backends.s3 import S3, get_s3_backend
 from borgstore.constants import ROOTNS
 
-
 is_win32 = sys.platform == "win32"
 
 
