@@ -120,3 +120,20 @@ def test_permission_lookup(tmp_path):
     # checks permissions for "" (known: l). destroy wants D -> denied.
     with pytest.raises(PermissionDenied):
         fs.destroy()
+
+
+def test_recursive_permission_shadowing(tmp_path):
+    # Permissions:
+    # "" (root): full access
+    # "restricted": read-only
+    permissions = {"": "lrwWD", "restricted": "lr"}
+    fs = PosixFS(path=tmp_path, permissions=permissions)
+    fs.create()
+    fs.open()
+    # Store at root should work
+    fs.store("item1", DATA1)
+    # Store in restricted subdirectory should FAIL
+    # Even though root has "w", "restricted" entry stops the lookup.
+    with pytest.raises(PermissionDenied):
+        fs.store("restricted/item2", DATA2)
+    fs.close()

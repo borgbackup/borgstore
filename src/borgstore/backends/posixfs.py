@@ -86,11 +86,14 @@ class PosixFS(BackendBase):
         path_parts = name.split("/")
         for i in range(len(path_parts), -1, -1):  # i: LEN .. 0
             path = "/".join(path_parts[:i])  # path: full path .. root
-            granted_permissions = self.permissions.get(path, "")
-            # Check if any of the required permissions is present.
-            for permission in required_permissions:
-                if permission in granted_permissions:
+            if path in self.permissions:
+                granted_permissions = self.permissions[path]
+                # Check if any of the required permissions is present.
+                if set(required_permissions) & set(granted_permissions):
                     return  # Permission granted
+                # If path was found in permissions but didn't have required permission, we stop here
+                # (more specific longer-path entry takes precedence over shorter-path entry).
+                break
 
         # If we get here, none of the required permissions was found
         raise PermissionDenied(f"One of permissions '{required_permissions}' required for '{name}'")
