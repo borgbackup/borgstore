@@ -13,6 +13,11 @@ import tempfile
 
 from . import key, list_names
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 from borgstore.backends._base import ItemInfo
 from borgstore.backends.errors import (
     BackendAlreadyExists,
@@ -121,8 +126,9 @@ def check_s3_available():
 
 
 sftp_is_available = check_sftp_available()
-rclone_is_available = check_rclone_available()
+rclone_is_available = requests is not None and check_rclone_available()
 s3_is_available = check_s3_available()
+rest_is_available = requests is not None
 
 
 @pytest.fixture(scope="function")
@@ -181,7 +187,9 @@ def rest_backend_created(tmp_path):
 def pytest_generate_tests(metafunc):
     # Generates tests for misc. storages
     if "tested_backends" in metafunc.fixturenames:
-        tested_backends = ["posixfs_backend_created", "rest_backend_created"]
+        tested_backends = ["posixfs_backend_created"]
+        if rest_is_available:
+            tested_backends += ["rest_backend_created"]
         if sftp_is_available:
             tested_backends += ["sftp_backend_created"]
         if rclone_is_available:
@@ -255,6 +263,7 @@ def test_sftp_url(url, username, hostname, port, path):
     assert backend.base_path == path
 
 
+@pytest.mark.skipif(not rest_is_available, reason="REST is not available (requests missing)")
 @pytest.mark.parametrize(
     "url,base_url,username,password",
     [

@@ -1,6 +1,25 @@
 Changelog
 =========
 
+Version 0.4.0 (2026-03-15)
+--------------------------
+
+New features:
+
+- REST (http/https) backend, REST server, #18
+
+Fixes:
+
+- fix permissions check, #139
+- posixfs/sftp: do not raise if base_path can not be deleted, #133
+- list: do not yield invalid names, #130
+- posixfs, s3, sftp: URL-unquote, #129
+
+Other changes:
+
+- add "rclone" and "rest" extras, "requests" is now an optional requirement
+
+
 Version 0.3.1 (2026-02-09)
 --------------------------
 

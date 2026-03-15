@@ -1,6 +1,10 @@
 import threading
 import pytest
-import requests
+
+try:
+    import requests
+except ImportError:
+    pytest.skip("requests is not installed", allow_module_level=True)
 
 from borgstore.constants import DEL_SUFFIX
 from borgstore.server.rest import BorgStoreRESTServer

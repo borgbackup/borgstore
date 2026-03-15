@@ -353,6 +353,10 @@ Install without the extras:
     pip install borgstore
     pip install "borgstore[none]"  # same thing (simplifies automation)
 
+Install with the ``rest:`` backend (more dependencies)::
+
+    pip install "borgstore[rest]"
+
 Install with the ``sftp:`` backend (more dependencies)::
 
     pip install "borgstore[sftp]"
@@ -360,6 +364,10 @@ Install with the ``sftp:`` backend (more dependencies)::
 Install with the ``s3:`` backend (more dependencies)::
 
     pip install "borgstore[s3]"
+
+Install with the ``rclone:`` backend (more dependencies)::
+
+    pip install "borgstore[rclone]"
 
 Please note that ``rclone:`` also supports SFTP and S3 remotes.
 

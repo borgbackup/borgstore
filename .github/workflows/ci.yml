@@ -73,6 +73,11 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y rclone openssh-server curl
+    - name: Install macOS packages
+      if: runner.os == 'macOS'
+      run: |
+        brew update
+        brew install rclone
     - name: Configure OpenSSH SFTP server (test only)
       if: runner.os == 'Linux'
       run: |
@@ -136,15 +141,15 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools
         pip install -r requirements.d/dev.txt
-    - name: Install borgstore (with all extras)
+    - name: Install borgstore
       if: runner.os == 'Linux'
-      run: pip install -ve ".[s3,sftp]"
-    - name: Install borgstore (no extras)
+      run: pip install -ve ".[s3,sftp,rest,rclone]"
+    - name: Install borgstore
       if: runner.os == 'Windows'
-      run: pip install -ve .
-    - name: Install borgstore (no extras)
+      run: pip install -ve ".[rest]"
+    - name: Install borgstore
       if: runner.os == 'macOS'
-      run: pip install -ve .
+      run: pip install -ve ".[rest,rclone]"
     - name: run tox envs (Linux)
       if: runner.os == 'Linux'
       run: tox -e all_extras
