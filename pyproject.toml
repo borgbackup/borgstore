@@ -23,10 +23,15 @@ license = "BSD-3-Clause"
 license-files = ["LICENSE.rst"]
 requires-python = ">=3.10"
 dependencies = [
-    "requests >= 2.25.1",
 ]
 
 [project.optional-dependencies]
+rest = [
+    "requests >= 2.25.1",
+]
+rclone = [
+    "requests >= 2.25.1",
+]
 sftp = [
     "paramiko >= 1.9.1",  # 1.9.1+ supports multiple IdentityKey entries in .ssh/config
 ]

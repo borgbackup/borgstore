@@ -4,13 +4,17 @@ BorgStore backend for rclone
 
 import os
 import re
-import requests
 import subprocess
 import json
 import secrets
 from typing import Iterator
 import time
 import socket
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import (
@@ -46,6 +50,11 @@ def get_rclone_backend(url):
 
     if not url.startswith("rclone:"):
         return None
+
+    if requests is None:
+        raise BackendDoesNotExist(
+            "The rclone backend requires dependencies. Install them with: 'pip install borgstore[rclone]'"
+        )
 
     try:
         # Check rclone is on the path

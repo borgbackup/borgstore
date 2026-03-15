@@ -8,8 +8,11 @@ from typing import Iterator, Dict, Optional
 from http import HTTPStatus as HTTP
 from urllib.parse import unquote
 
-import requests
-from requests.auth import HTTPBasicAuth
+try:
+    import requests
+    from requests.auth import HTTPBasicAuth
+except ImportError:
+    requests = HTTPBasicAuth = None
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import (
@@ -26,6 +29,14 @@ from .errors import (
 def get_rest_backend(base_url: str):
     # http(s)://username:password@hostname:port/ or http(s)://hostname:port/ + auth from env
     # note: path component must be "/" (no sub-path allowed, as it would silently prepend to all item names)
+    if not base_url.startswith(("http:", "https:")):
+        return None
+
+    if requests is None:
+        raise BackendDoesNotExist(
+            "The REST backend requires dependencies. Install them with: 'pip install borgstore[rest]'"
+        )
+
     http_regex = r"""
         (?P<scheme>http|https)://
         ((?P<username>[^:]+):(?P<password>[^@]+)@)?
