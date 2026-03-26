@@ -462,6 +462,18 @@ def test_load_partial(tested_backends, request):
         assert backend.load("key", offset=-3) == b"789"
         assert backend.load("key", offset=-4, size=2) == b"67"
 
+        # test tail loading optimization (-offset - size <= 1024)
+        # offset=-10, size=9 -> -offset - size = 1 <= 1024 -> optimized
+        assert backend.load("key", offset=-10, size=9) == b"012345678"
+        # offset=-10, size=1 -> -offset - size = 9 <= 1024 -> optimized
+        assert backend.load("key", offset=-10, size=1) == b"0"
+        # offset=-2000, size=1000 -> -offset - size = 1000 <= 1024 -> optimized
+        backend.store("large", b"x" * 2000)
+        assert backend.load("large", offset=-2000, size=1000) == b"x" * 1000
+        # offset=-3000, size=1000 -> -offset - size = 2000 > 1024 -> NOT optimized
+        backend.store("huge", b"y" * 3000)
+        assert backend.load("huge", offset=-3000, size=1000) == b"y" * 1000
+
 
 def test_already_exists(tested_backends, request):
     backend = get_backend_from_fixture(tested_backends, request)

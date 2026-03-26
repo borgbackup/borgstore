@@ -171,8 +171,13 @@ class REST(BackendBase):
         validate_name(name)
 
         if offset < 0 and size is not None:
-            info = self.info(name)
-            range_header = make_range_header(offset, size, info.size)
+            if -offset - size <= 1024:
+                # Optimization: if the part of the tail we don't need is small,
+                # we just request the last N bytes and truncate locally.
+                range_header = make_range_header(offset, size=None)
+            else:
+                info = self.info(name)
+                range_header = make_range_header(offset, size, info.size)
         else:
             range_header = make_range_header(offset, size)
 
@@ -182,7 +187,10 @@ class REST(BackendBase):
 
         response = self._request("get", self._url(name), headers=headers)
         self._handle_response(response, name)
-        return response.content
+        content = response.content
+        if offset < 0 and size is not None and size < len(content):
+            content = content[:size]
+        return content
 
     def store(self, name: str, value: bytes) -> None:
         self._assert_open()

@@ -189,8 +189,13 @@ class S3(BackendBase):
         key = self.base_path + name
         try:
             if offset < 0 and size is not None:
-                info = self.info(name)
-                range_header = make_range_header(offset, size, info.size)
+                if -offset - size <= 1024:
+                    # Optimization: if the part of the tail we don't need is small,
+                    # we just request the last N bytes and truncate locally.
+                    range_header = make_range_header(offset, size=None)
+                else:
+                    info = self.info(name)
+                    range_header = make_range_header(offset, size, info.size)
             else:
                 range_header = make_range_header(offset, size)
 
@@ -198,7 +203,10 @@ class S3(BackendBase):
                 obj = self.s3.get_object(Bucket=self.bucket, Key=key, Range=range_header)
             else:
                 obj = self.s3.get_object(Bucket=self.bucket, Key=key)
-            return obj["Body"].read()
+            content = obj["Body"].read()
+            if offset < 0 and size is not None and size < len(content):
+                content = content[:size]
+            return content
         except self.s3.exceptions.NoSuchKey:
             raise ObjectNotFound(name)
 
