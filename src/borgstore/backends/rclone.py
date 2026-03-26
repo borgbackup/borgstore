@@ -17,6 +17,7 @@ except ImportError:
     requests = None
 
 from ._base import BackendBase, ItemInfo, validate_name
+from ._utils import make_range_header
 from .errors import (
     BackendError,
     BackendDoesNotExist,
@@ -258,11 +259,13 @@ class Rclone(BackendBase):
         """Load value from <name>."""
         validate_name(name)
         headers = {}
-        if size is not None or offset > 0:
-            if size is not None:
-                headers["Range"] = f"bytes={offset}-{offset+size-1}"
-            else:
-                headers["Range"] = f"bytes={offset}-"
+        if offset < 0 and size is not None:
+            info = self.info(name)
+            range_header = make_range_header(offset, size, info.size)
+        else:
+            range_header = make_range_header(offset, size)
+        if range_header:
+            headers["Range"] = range_header
         r = self._requests(requests.get, f"{self.url}[{self.fs}]/{name}", tries=self.TRIES, headers=headers)
         return r.content
 

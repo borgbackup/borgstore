@@ -193,8 +193,8 @@ class PosixFS(BackendBase):
         self._check_permission(name, "r")
         try:
             with path.open("rb") as f:
-                if offset > 0:
-                    f.seek(offset)
+                if offset != 0:
+                    f.seek(offset, os.SEEK_SET if offset >= 0 else os.SEEK_END)
                 return f.read(-1 if size is None else size)
         except FileNotFoundError:
             raise ObjectNotFound(name) from None

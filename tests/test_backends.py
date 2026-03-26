@@ -459,6 +459,8 @@ def test_load_partial(tested_backends, request):
         assert backend.load("key", size=3) == b"012"
         assert backend.load("key", offset=5) == b"56789"
         assert backend.load("key", offset=4, size=4) == b"4567"
+        assert backend.load("key", offset=-3) == b"789"
+        assert backend.load("key", offset=-4, size=2) == b"67"
 
 
 def test_already_exists(tested_backends, request):

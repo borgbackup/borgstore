@@ -15,6 +15,7 @@ from ..backends.errors import (
     BackendMustBeOpen,
     BackendMustNotBeOpen,
 )
+from ..backends._utils import parse_range_header
 from ..store import get_backend
 
 logger = logging.getLogger(__name__)
@@ -251,18 +252,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
         try:
             range_header = self.headers.get("Range")
-            offset = 0
-            size = None
-            if range_header and range_header.startswith("bytes="):
-                # Simple Range: bytes=OFFSET- or bytes=OFFSET-END
-                try:
-                    range_val = range_header.split("=")[1]
-                    start_str, end_str = range_val.split("-")
-                    offset = int(start_str)
-                    if end_str:
-                        size = int(end_str) - offset + 1
-                except ValueError:
-                    pass
+            offset, size = parse_range_header(range_header) if range_header else (0, None)
 
             with self.server.backend:
                 data = self.server.backend.load(self.name, offset=offset, size=size)
