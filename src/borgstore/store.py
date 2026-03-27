@@ -233,6 +233,10 @@ class Store:
             self.backend.store(self.find(name), value)
             self._stats_update_volume("store", len(value))
 
+    def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
+        with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
+            return self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm)
+
     def delete(self, name: str, *, deleted=False) -> None:
         """
         Really and immediately deletes an item.

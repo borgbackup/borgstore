@@ -283,6 +283,13 @@ class Sftp(BackendBase):
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
 
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        # if the sftp server doesn't support a hashing extension, we must do it locally.
+        # most sftp servers do not support it.
+        return super().hash(name, algorithm=algorithm)
+
     def move(self, curr_name, new_name):
         def _rename_to_new_name():
             self.client.posix_rename(curr_name, new_name)

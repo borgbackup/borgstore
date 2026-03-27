@@ -2,6 +2,7 @@
 Filesystem-based backend implementation - uses files in directories below a base path.
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -271,6 +272,26 @@ class PosixFS(BackendBase):
                 _rename_to_new_name()
             except FileNotFoundError:
                 raise ObjectNotFound(curr_name) from None
+
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        path = self._validate_join(name)
+        self._check_permission(name, "r")
+        try:
+            h = hashlib.new(algorithm)
+        except ValueError:
+            raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
+        try:
+            with path.open("rb") as f:
+                while True:
+                    data = f.read(1024 * 1024)
+                    if not data:
+                        break
+                    h.update(data)
+        except FileNotFoundError:
+            raise ObjectNotFound(name) from None
+        return h.hexdigest()
 
     def list(self, name):
         if not self.opened:

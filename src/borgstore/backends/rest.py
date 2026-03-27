@@ -211,6 +211,13 @@ class REST(BackendBase):
         response = self._request("post", self._url(""), params={"cmd": "move", "current": curr_name, "new": new_name})
         self._handle_response(response, f"{curr_name} -> {new_name}")
 
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        self._assert_open()
+        validate_name(name)
+        response = self._request("post", self._url(name), params={"cmd": "hash", "algorithm": algorithm})
+        self._handle_response(response, name)
+        return response.text
+
     def list(self, name: str) -> Iterator[ItemInfo]:
         self._assert_open()
         validate_name(name)

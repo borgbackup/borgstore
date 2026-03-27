@@ -289,6 +289,10 @@ class Rclone(BackendBase):
         validate_name(name)
         self._rpc("operations/deletefile", {"fs": self.fs, "remote": name})
 
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        validate_name(name)
+        return super().hash(name, algorithm=algorithm)
+
     def move(self, curr_name: str, new_name: str) -> None:
         """Rename curr_name to new_name (overwrite target)."""
         validate_name(curr_name)

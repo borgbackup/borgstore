@@ -2,6 +2,7 @@
 Generic tests for the backend implementations.
 """
 
+import hashlib
 import os
 import sys
 import time
@@ -598,3 +599,31 @@ def test_posixfs_missing_parent_dirs(tmp_path):
         be.store("key", b"value")
     finally:
         be.close()
+
+
+def test_hash(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    with backend:
+        data = b"hash me"
+        expected_hash = hashlib.sha256(data).hexdigest()
+        backend.store("test/item", data)
+        assert backend.hash("test/item") == expected_hash
+        assert backend.hash("test/item", algorithm="sha256") == expected_hash
+
+        # Test unsupported algorithm
+        with pytest.raises(ValueError, match="Unsupported hash algorithm"):
+            backend.hash("test/item", algorithm="invalid_algo")
+
+        # Large-ish data to test chunking
+        large_data = b"a" * (2 * 1024 * 1024)
+        expected_large_hash = hashlib.sha256(large_data).hexdigest()
+        backend.store("test/large_item", large_data)
+        assert backend.hash("test/large_item") == expected_large_hash
+
+        # Test error for nonexistent object
+        with pytest.raises(ObjectNotFound):
+            backend.hash("test/nonexistent")
+
+    # Test must be open
+    with pytest.raises(BackendMustBeOpen):
+        backend.hash("test/item")
