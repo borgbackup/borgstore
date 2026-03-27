@@ -15,6 +15,7 @@ except ImportError:
     requests = HTTPBasicAuth = None
 
 from ._base import BackendBase, ItemInfo, validate_name
+from ._utils import make_range_header
 from .errors import (
     ObjectNotFound,
     BackendAlreadyExists,
@@ -169,14 +170,27 @@ class REST(BackendBase):
         self._assert_open()
         validate_name(name)
 
-        r_hdr = (None if not offset else f"bytes={offset}-") if size is None else f"bytes={offset}-{offset + size - 1}"
+        if offset < 0 and size is not None:
+            if -offset - size <= 1024:
+                # Optimization: if the part of the tail we don't need is small,
+                # we just request the last N bytes and truncate locally.
+                range_header = make_range_header(offset, size=None)
+            else:
+                info = self.info(name)
+                range_header = make_range_header(offset, size, info.size)
+        else:
+            range_header = make_range_header(offset, size)
+
         headers = self.headers.copy()
-        if r_hdr:
-            headers["Range"] = r_hdr
+        if range_header:
+            headers["Range"] = range_header
 
         response = self._request("get", self._url(name), headers=headers)
         self._handle_response(response, name)
-        return response.content
+        content = response.content
+        if offset < 0 and size is not None and size < len(content):
+            content = content[:size]
+        return content
 
     def store(self, name: str, value: bytes) -> None:
         self._assert_open()

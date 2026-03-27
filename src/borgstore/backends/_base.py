@@ -96,7 +96,11 @@ class BackendBase(ABC):
 
     @abstractmethod
     def load(self, name: str, *, size=None, offset=0) -> bytes:
-        """load value from <name>"""
+        """load value from <name>
+
+        If offset is negative, it is counted from the end of the file.
+        If size is None, the whole object starting at offset is loaded.
+        """
 
     @abstractmethod
     def store(self, name: str, value: bytes) -> None:

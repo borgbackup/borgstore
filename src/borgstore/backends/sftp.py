@@ -238,7 +238,7 @@ class Sftp(BackendBase):
         validate_name(name)
         try:
             with self.client.open(name) as f:
-                f.seek(offset)
+                f.seek(offset, 0 if offset >= 0 else 2)
                 f.prefetch(size)  # speeds up the following read() significantly!
                 return f.read(size)
         except FileNotFoundError:
