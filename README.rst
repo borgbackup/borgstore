@@ -187,6 +187,7 @@ Use storage on an SFTP server:
   - Users must know the full absolute path of the space they are permitted to use.
 - Namespaces: directories
 - Values: in key-named files
+- hash: runs the hexdigest computation server-side (if server supports check-file).
 
 rclone
 ~~~~~~
