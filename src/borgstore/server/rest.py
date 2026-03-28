@@ -175,6 +175,29 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 self._handle_exception(e, f"hash {self.name}")
             return
 
+        if cmd == "defrag":
+            target = self.query.get("target", [None])[0]
+            algorithm = self.query.get("algorithm", [None])[0]
+            namespace = self.query.get("namespace", [None])[0]
+            levels = int(self.query.get("levels", [0])[0])
+            if not target and not algorithm:
+                self.send_error(HTTP.BAD_REQUEST, "Missing target or algorithm for defrag")
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                sources = json.loads(body)
+                with self.server.backend:
+                    target = self.server.backend.defrag(
+                        sources, target=target, algorithm=algorithm, namespace=namespace, levels=levels
+                    )
+                self.respond(HTTP.OK, data=target.encode("ascii"), content_type="text/plain")
+            except ValueError as e:
+                self.send_error(HTTP.BAD_REQUEST, str(e))
+            except Exception as e:
+                self._handle_exception(e, "defrag")
+            return
+
         if self.name:
             try:
                 content_length = int(self.headers.get("Content-Length", 0))

@@ -115,6 +115,36 @@ class BackendBase(ABC):
     def move(self, curr_name: str, new_name: str) -> None:
         """rename curr_name to new_name (overwrite target)"""
 
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:
+        """
+        Similar to the higher-level Store.defrag method, with these differences:
+
+        - source and target item names are with namespace.
+        - if levels > 0, source and target item names are nested.
+
+        Returns the target item name.
+        """
+        # default implementation: slow, but works for all backends.
+        # might be overridden for performance.
+        from ..utils.nesting import nest
+
+        data = b"".join(self.load(source, offset=offset, size=size) for source, offset, size in sources)
+        if target is None:
+            if algorithm is None:
+                raise ValueError("Either target or algorithm must be given for defrag")
+            try:
+                h = hashlib.new(algorithm)
+            except (ValueError, TypeError):
+                raise ValueError(f"Unsupported hash algorithm: {algorithm}")
+            h.update(data)
+            target = h.hexdigest()
+            if namespace:
+                target = namespace.rstrip("/") + "/" + target
+            if levels:
+                target = nest(target, levels)
+        self.store(target, data)
+        return target
+
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         """compute full-file hex digest of <name> content using <algorithm>"""
         # default implementation: slow, but works for all backends.

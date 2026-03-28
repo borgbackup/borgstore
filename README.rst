@@ -52,6 +52,7 @@ API can be much simpler:
 - delete: immediately remove an item from the store (given its key).
 - move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
+- defrag: general purpose defragmentation helper (copies blocks to new items)
 - stats: API call counters, time spent in API methods, data volume/throughput.
 - latency/bandwidth emulator: can emulate higher latency (via BORGSTORE_LATENCY
   [us]) and lower bandwidth (via BORGSTORE_BANDWIDTH [bit/s]) than what is
@@ -237,6 +238,7 @@ Use storage on a BorgStore REST server:
 - Values: depends on backend used by the server
 - Authentication: Optional Basic Auth is supported.
 - hash: runs the hexdigest computation server-side.
+- defrag: runs the defragmentation helper server-side.
 
 
 REST Server

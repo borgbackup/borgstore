@@ -278,3 +278,159 @@ def test_rest_server_hash(rest_server_with_auth):
             be.hash("test/nonexistent")
     finally:
         be.close()
+
+
+def test_rest_server_defrag(tmp_path):
+    import json
+    import requests
+
+    backend_url = tmp_path.as_uri()
+    address, port = "127.0.0.1", 0
+    username, password = "testuser", "testpassword"
+
+    server, thread = start_server(backend_url, address, port, username, password)
+    host, assigned_port = server.server_address
+    url = f"http://{host}:{assigned_port}/"
+    headers = {"Accept": "application/vnd.x.borgstore.rest.v1"}
+    auth = (username, password)
+
+    try:
+        # 1. Create backend
+        requests.post(url + "?cmd=create", auth=auth, headers=headers).raise_for_status()
+
+        # 2. Store some initial data
+        requests.post(url + "file1", data=b"0123456789", auth=auth, headers=headers).raise_for_status()
+        requests.post(url + "file2", data=b"abcdefghij", auth=auth, headers=headers).raise_for_status()
+
+        # 3. Call defrag
+        # We want to take "234" from file1 (offset 2, size 3) and "fg" from file2 (offset 5, size 2)
+        # Expected result: "234fg"
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        response = requests.post(
+            url + "?cmd=defrag&target=targetfile", data=json.dumps(sources), auth=auth, headers=headers
+        )
+        response.raise_for_status()
+        assert response.text == "targetfile"
+        assert response.headers["Content-Type"] == "text/plain"
+
+        # 4. Verify the result
+        response = requests.get(url + "targetfile", auth=auth, headers=headers)
+        response.raise_for_status()
+        assert response.content == b"234fg"
+
+        # 5. Test with empty list
+        response = requests.post(url + "?cmd=defrag&target=emptyfile", data=json.dumps([]), auth=auth, headers=headers)
+        response.raise_for_status()
+        response = requests.get(url + "emptyfile", auth=auth, headers=headers)
+        assert response.content == b""
+
+        # 6. Test with missing target
+        response = requests.post(url + "?cmd=defrag", data=json.dumps(sources), auth=auth, headers=headers)
+        assert response.status_code == 400
+        assert "Missing target or algorithm" in response.text
+
+        # 7. Test with algorithm but no target
+        combined_data = b"234fg"
+        algo = "sha256"
+        expected_hash = hashlib.sha256(combined_data).hexdigest()
+        response = requests.post(
+            url + f"?cmd=defrag&algorithm={algo}", data=json.dumps(sources), auth=auth, headers=headers
+        )
+        response.raise_for_status()
+        assert response.text == expected_hash
+        assert response.headers["Content-Type"] == "text/plain"
+        response = requests.get(url + expected_hash, auth=auth, headers=headers)
+        assert response.content == combined_data
+
+        # 8. Test that target overrides algorithm
+        # Even if algorithm is provided, if target is also provided, target is used.
+        response = requests.post(
+            url + f"?cmd=defrag&target=override_target&algorithm={algo}",
+            data=json.dumps(sources),
+            auth=auth,
+            headers=headers,
+        )
+        response.raise_for_status()
+        assert response.text == "override_target"
+        response = requests.get(url + "override_target", auth=auth, headers=headers)
+        assert response.content == combined_data
+
+        # 9. Test with levels=1 and algorithm
+        from borgstore.utils.nesting import nest
+
+        response = requests.post(
+            url + f"?cmd=defrag&algorithm={algo}&levels=1", data=json.dumps(sources), auth=auth, headers=headers
+        )
+        response.raise_for_status()
+        expected_nested_res = nest(expected_hash, levels=1)
+        assert response.text == expected_nested_res
+        response = requests.get(url + expected_nested_res, auth=auth, headers=headers)
+        assert response.content == combined_data
+
+        # 10. Test with namespace, levels=1 and algorithm
+        namespace = "ns1"
+        response = requests.post(
+            url + f"?cmd=defrag&algorithm={algo}&namespace={namespace}&levels=1",
+            data=json.dumps(sources),
+            auth=auth,
+            headers=headers,
+        )
+        response.raise_for_status()
+        expected_nested_res_ns = nest(namespace + "/" + expected_hash, levels=1)
+        assert response.text == expected_nested_res_ns
+        response = requests.get(url + expected_nested_res_ns, auth=auth, headers=headers)
+        assert response.content == combined_data
+
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_rest_backend_defrag(rest_server_with_auth):
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        be.store("file1", b"0123456789")
+        be.store("file2", b"abcdefghij")
+
+        # Test defrag with target
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        res = be.defrag(sources, target="target1")
+        assert res == "target1"
+        assert be.load("target1") == b"234fg"
+
+        # Test defrag with algorithm
+        res = be.defrag(sources, algorithm="sha256")
+        expected_hash = hashlib.sha256(b"234fg").hexdigest()
+        assert res == expected_hash
+        assert be.load(expected_hash) == b"234fg"
+
+        # Test with empty sources
+        res = be.defrag([], target="empty")
+        assert res == "empty"
+        assert be.load("empty") == b""
+
+        # Test error: neither target nor algorithm
+        with pytest.raises(ValueError, match="Missing target or algorithm"):
+            be.defrag(sources)
+
+        # Test error: unsupported algorithm
+        with pytest.raises(ValueError, match="Unsupported hash algorithm"):
+            be.defrag(sources, algorithm="invalid")
+
+        # Test defrag with levels=1 and algorithm
+        from borgstore.utils.nesting import nest
+
+        res = be.defrag(sources, algorithm="sha256", levels=1)
+        expected_hash = hashlib.sha256(b"234fg").hexdigest()
+        assert res == nest(expected_hash, levels=1)
+        assert be.load(res) == b"234fg"
+
+        # Test defrag with namespace, levels=1 and algorithm
+        res = be.defrag(sources, algorithm="sha256", namespace="ns1", levels=1)
+        assert res == nest("ns1/" + expected_hash, levels=1)
+        assert be.load(res) == b"234fg"
+
+    finally:
+        be.close()
