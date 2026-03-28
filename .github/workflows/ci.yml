@@ -79,7 +79,7 @@ jobs:
         brew update
         brew install rclone
     - name: Configure OpenSSH SFTP server (test only)
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
       run: |
         sudo mkdir -p /run/sshd
         sudo useradd -m -s /bin/bash sftpuser || true
@@ -108,7 +108,7 @@ jobs:
         # Export SFTP test URL for tox via GITHUB_ENV
         echo "BORGSTORE_TEST_SFTP_URL=sftp://sftpuser@localhost:22/borgstore/temp-store" >> $GITHUB_ENV
     - name: Install and configure MinIO S3 server (test only)
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
       run: |
         set -e
         arch=$(uname -m)
