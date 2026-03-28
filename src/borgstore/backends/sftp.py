@@ -297,6 +297,7 @@ class Sftp(BackendBase):
             except IOError:
                 # check-file not supported or algorithm not supported
                 self.check_file_supported = False
+        return None
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         if not self.opened:
