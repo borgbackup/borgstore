@@ -92,11 +92,11 @@ class Sftp(BackendBase):
         host_config.update(self._get_host_config_from_file("~/.ssh/config", self.hostname))
         # Now override configured values with provided values
         if self.username is not None:
-            host_config.update({"user": self.username})
+            host_config["user"] = self.username
         if self.port != 0:
-            host_config.update({"port": self.port})
-        # Make sure port is present and is an int
-        host_config["port"] = int(host_config.get("port") or 22)
+            host_config["port"] = str(self.port)
+        # Make sure port is present.
+        host_config["port"] = str(host_config.get("port") or "22")
         return host_config
 
     def _connect(self):
@@ -109,7 +109,7 @@ class Sftp(BackendBase):
         ssh.connect(
             hostname=host_config["hostname"],
             username=host_config.get("user"),  # if None, paramiko will use current user
-            port=host_config["port"],
+            port=int(host_config["port"]),
             key_filename=host_config.get("identityfile"),  # list of keys, ~ is already expanded
             allow_agent=True,
         )
@@ -162,7 +162,7 @@ class Sftp(BackendBase):
         self._connect()
         try:
             try:
-                st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
+                self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
             except FileNotFoundError:
                 raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}") from None
             delete_recursive(self.base_path)
@@ -297,6 +297,7 @@ class Sftp(BackendBase):
             except IOError:
                 # check-file not supported or algorithm not supported
                 self.check_file_supported = False
+        return None
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         if not self.opened:

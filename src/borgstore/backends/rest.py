@@ -6,14 +6,20 @@ import os
 import re
 import json
 from typing import Iterator, Dict, Optional
+from types import ModuleType
 from http import HTTPStatus as HTTP
 from urllib.parse import unquote
 
+requests: Optional[ModuleType] = None
+HTTPBasicAuth: Optional[type] = None
 try:
-    import requests
-    from requests.auth import HTTPBasicAuth
+    import requests as requests_module
+    from requests.auth import HTTPBasicAuth as HTTPBasicAuth_class
+
+    requests = requests_module
+    HTTPBasicAuth = HTTPBasicAuth_class
 except ImportError:
-    requests = HTTPBasicAuth = None
+    pass
 
 from ._base import BackendBase, ItemInfo, validate_name
 from ._utils import make_range_header
