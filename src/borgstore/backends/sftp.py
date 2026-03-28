@@ -92,11 +92,11 @@ class Sftp(BackendBase):
         host_config.update(self._get_host_config_from_file("~/.ssh/config", self.hostname))
         # Now override configured values with provided values
         if self.username is not None:
-            host_config.update({"user": self.username})
+            host_config["user"] = self.username
         if self.port != 0:
-            host_config.update({"port": self.port})
-        # Make sure port is present and is an int
-        host_config["port"] = int(host_config.get("port") or 22)
+            host_config["port"] = str(self.port)
+        # Make sure port is present.
+        host_config["port"] = str(host_config.get("port") or "22")
         return host_config
 
     def _connect(self):
@@ -109,7 +109,7 @@ class Sftp(BackendBase):
         ssh.connect(
             hostname=host_config["hostname"],
             username=host_config.get("user"),  # if None, paramiko will use current user
-            port=host_config["port"],
+            port=int(host_config["port"]),
             key_filename=host_config.get("identityfile"),  # list of keys, ~ is already expanded
             allow_agent=True,
         )
