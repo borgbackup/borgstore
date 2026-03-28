@@ -273,6 +273,19 @@ class PosixFS(BackendBase):
             except FileNotFoundError:
                 raise ObjectNotFound(curr_name) from None
 
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        # check all permissions before doing anything
+        prefix = namespace.rstrip("/") + "/" if namespace else ""
+        # if target is not given, an item named like content-hash is created in same namespace.
+        check_target = target if target else prefix + "01234567"
+        self._check_permission(check_target, "W")
+        names = [prefix + source[0] for source in sources]
+        for name in names:
+            self._check_permission(name, "r")
+        return super().defrag(sources, target=target, algorithm=algorithm, namespace=namespace, levels=levels)
+
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         if not self.opened:
             raise BackendMustBeOpen()
