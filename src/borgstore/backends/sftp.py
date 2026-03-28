@@ -162,7 +162,7 @@ class Sftp(BackendBase):
         self._connect()
         try:
             try:
-                st = self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
+                self.client.stat(self.base_path)  # check if this storage exists, fail early if not.
             except FileNotFoundError:
                 raise BackendDoesNotExist(f"sftp storage base path does not exist: {self.base_path}") from None
             delete_recursive(self.base_path)
