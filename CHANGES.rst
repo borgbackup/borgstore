@@ -1,6 +1,19 @@
 Changelog
 =========
 
+Version 0.x.x (not released yet)
+--------------------------------
+
+New features:
+
+- load: implement tail loading support (negative offset)
+- defrag: defragmentation helper (copies blocks from source to target items)
+- hash: item content hashing, e.g. sha256
+- REST server: server-side implementation of defrag and hash
+- sftp: try to use "check-file" for SFTP server-side hashing (not supported
+  by OpenSSH and also not tested by us; please give feedback if you use it)
+
+
 Version 0.4.0 (2026-03-15)
 --------------------------
 

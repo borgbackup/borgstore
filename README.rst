@@ -252,6 +252,7 @@ cloud storage servers:
 
 - enforcing permissions
 - server-side hash computation (e.g. sha256) for item content
+- server-side defragmentation helper (copies blocks to new items)
 
 Running the server
 ~~~~~~~~~~~~~~~~~~
