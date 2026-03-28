@@ -141,13 +141,13 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools
         pip install -r requirements.d/dev.txt
-    - name: Install borgstore
+    - name: Install borgstore (Linux)
       if: runner.os == 'Linux'
       run: pip install -ve ".[s3,sftp,rest,rclone]"
-    - name: Install borgstore
+    - name: Install borgstore (Windows)
       if: runner.os == 'Windows'
       run: pip install -ve ".[rest]"
-    - name: Install borgstore
+    - name: Install borgstore (macOS)
       if: runner.os == 'macOS'
       run: pip install -ve ".[rest,rclone]"
     - name: run tox envs
