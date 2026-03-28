@@ -150,12 +150,5 @@ jobs:
     - name: Install borgstore
       if: runner.os == 'macOS'
       run: pip install -ve ".[rest,rclone]"
-    - name: run tox envs (Linux)
-      if: runner.os == 'Linux'
-      run: tox -e all_extras
-    - name: run tox envs (Windows)
-      if: runner.os == 'Windows'
-      run: tox -e ${{ matrix.toxenv }}
-    - name: run tox envs (macOS)
-      if: runner.os == 'macOS'
+    - name: run tox envs
       run: tox -e ${{ matrix.toxenv }}
