@@ -162,6 +162,19 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 self._handle_exception(e, f"mkdir {self.name}")
             return
 
+        if cmd == "hash":
+            if not self.name:
+                self.send_error(HTTP.BAD_REQUEST, "Missing name for hash")
+                return
+            algorithm = self.query.get("algorithm", ["sha256"])[0]
+            try:
+                with self.server.backend:
+                    digest = self.server.backend.hash(self.name, algorithm=algorithm)
+                self.respond(HTTP.OK, data=digest.encode("ascii"), content_type="text/plain")
+            except Exception as e:
+                self._handle_exception(e, f"hash {self.name}")
+            return
+
         if self.name:
             try:
                 content_length = int(self.headers.get("Content-Length", 0))

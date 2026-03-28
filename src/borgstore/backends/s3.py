@@ -224,6 +224,11 @@ class S3(BackendBase):
             if e.response["Error"]["Code"] == "404":
                 raise ObjectNotFound(name)
 
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        return super().hash(name, algorithm=algorithm)
+
     def move(self, curr_name, new_name):
         if not self.opened:
             raise BackendMustBeOpen()

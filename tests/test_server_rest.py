@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import pytest
 
@@ -249,3 +250,31 @@ def test_rest_server_auth_required(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_rest_server_hash(rest_server_with_auth):
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        data = b"hash me"
+        expected_hash = hashlib.sha256(data).hexdigest()
+        be.store("test/item", data)
+        assert be.hash("test/item") == expected_hash
+        assert be.hash("test/item", algorithm="sha256") == expected_hash
+
+        # Test unsupported algorithm
+        with pytest.raises(ValueError, match="Unsupported hash algorithm"):
+            be.hash("test/item", algorithm="invalid_algo")
+
+        # Large-ish data to test chunking (though 2MB isn't very large, it's enough to cross 1MB chunk)
+        large_data = b"a" * (2 * 1024 * 1024)
+        expected_large_hash = hashlib.sha256(large_data).hexdigest()
+        be.store("test/large_item", large_data)
+        assert be.hash("test/large_item") == expected_large_hash
+
+        # Test error for nonexistent object
+        with pytest.raises(ObjectNotFound):
+            be.hash("test/nonexistent")
+    finally:
+        be.close()

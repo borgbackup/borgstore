@@ -66,6 +66,7 @@ class Sftp(BackendBase):
         self.port = port
         self.base_path = path
         self.opened = False
+        self.check_file_supported = True
         if paramiko is None:
             raise BackendError("sftp backend unavailable: could not import paramiko!")
 
@@ -282,6 +283,29 @@ class Sftp(BackendBase):
             self.client.unlink(name)
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
+
+    def _sftp_hash(self, name: str, algorithm: str) -> str | None:
+        # Sadly, as of 2026-03-28, this is not supported by OpenSSH,
+        # but by some less popular SFTP servers.
+        if self.check_file_supported:
+            try:
+                with self.client.open(name) as f:
+                    digest = f.check(algorithm)
+                    return digest.hex()
+            except FileNotFoundError:
+                raise ObjectNotFound(name) from None
+            except IOError:
+                # check-file not supported or algorithm not supported
+                self.check_file_supported = False
+
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        validate_name(name)
+        hexdigest = self._sftp_hash(name, algorithm)
+        if hexdigest is not None:
+            return hexdigest
+        return super().hash(name, algorithm=algorithm)
 
     def move(self, curr_name, new_name):
         def _rename_to_new_name():

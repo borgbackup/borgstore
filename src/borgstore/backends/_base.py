@@ -4,6 +4,7 @@ Base class and type definitions for all backend implementations in this package.
 Docs that are not backend-specific are also found here.
 """
 
+import hashlib
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Iterator
@@ -113,6 +114,17 @@ class BackendBase(ABC):
     @abstractmethod
     def move(self, curr_name: str, new_name: str) -> None:
         """rename curr_name to new_name (overwrite target)"""
+
+    def hash(self, name: str, algorithm: str = "sha256") -> str:
+        """compute full-file hex digest of <name> content using <algorithm>"""
+        # default implementation: slow, but works for all backends.
+        # might be overridden for performance.
+        try:
+            h = hashlib.new(algorithm)
+        except ValueError:
+            raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
+        h.update(self.load(name))
+        return h.hexdigest()
 
     @abstractmethod
     def list(self, name: str) -> Iterator[ItemInfo]:

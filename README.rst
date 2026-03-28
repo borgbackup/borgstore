@@ -48,6 +48,7 @@ API can be much simpler:
 - load: read a value from the store (given its key); partial loads specifying
   an offset and/or size are supported.
 - info: get information about an item via its key (exists, size, ...).
+- hash: computes the hexdigest for the content of an item (given its key).
 - delete: immediately remove an item from the store (given its key).
 - move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
@@ -186,6 +187,7 @@ Use storage on an SFTP server:
   - Users must know the full absolute path of the space they are permitted to use.
 - Namespaces: directories
 - Values: in key-named files
+- hash: runs the hexdigest computation server-side (if server supports check-file).
 
 rclone
 ~~~~~~
@@ -234,6 +236,7 @@ Use storage on a BorgStore REST server:
 - Namespaces: depends on backend used by the server
 - Values: depends on backend used by the server
 - Authentication: Optional Basic Auth is supported.
+- hash: runs the hexdigest computation server-side.
 
 
 REST Server
@@ -241,6 +244,12 @@ REST Server
 
 BorgStore includes a simple REST server that can be used to provide remote access
 to any BorgStore backend.
+
+It can do some stuff server-side, which is usually not possible when using other
+cloud storage servers:
+
+- enforcing permissions
+- server-side hash computation (e.g. sha256) for item content
 
 Running the server
 ~~~~~~~~~~~~~~~~~~

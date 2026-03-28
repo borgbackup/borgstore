@@ -2,6 +2,7 @@
 Tests for the high-level Store API.
 """
 
+import hashlib
 import pytest
 
 from . import key, list_store_names, list_store_names_sorted
@@ -89,6 +90,26 @@ def test_basics(posixfs_store_created):
         assert not store.backend.info("two/00/00/00000000").exists
 
         assert list(store.list(ns)) == []
+
+
+def test_hash(posixfs_store_created):
+    ns = "two"
+    k0 = key(0)
+    v0 = b"value0"
+    nsk0 = ns + "/" + k0
+    expected_hash = hashlib.sha256(v0).hexdigest()
+    with posixfs_store_created as store:
+        store.store(nsk0, v0)
+        assert store.hash(nsk0) == expected_hash
+        assert store.hash(nsk0, algorithm="sha256") == expected_hash
+
+        # Test with soft-deletion
+        store.move(nsk0, delete=True)
+        assert store.hash(nsk0, deleted=True) == expected_hash
+
+        # Test unsupported algorithm
+        with pytest.raises(ValueError, match="Unsupported hash algorithm"):
+            store.hash(nsk0, algorithm="invalid_algo", deleted=True)
 
 
 @pytest.mark.parametrize("namespace,count", [("zero", 100), ("one", 1000)])
