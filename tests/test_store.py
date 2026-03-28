@@ -92,6 +92,28 @@ def test_basics(posixfs_store_created):
         assert list(store.list(ns)) == []
 
 
+def test_defrag_nested(posixfs_store_created):
+    ns = "two"  # nested! LEVELS_CONFIG has {"two/": [2]}
+    v1 = b"0123456789"
+    v2 = b"abcdefghij"
+    with posixfs_store_created as store:
+        store.store(ns + "/file1", v1)
+        store.store(ns + "/file2", v2)
+
+        # 1. Test defrag with explicit target
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        expected_data = b"234fg"
+        res = store.defrag(sources, target="target1", namespace=ns)
+        assert res == "target1"
+        assert store.load(ns + "/" + res) == expected_data
+
+        # 2. Test defrag with algorithm (auto target name)
+        res = store.defrag(sources, algorithm="sha256", namespace=ns)
+        expected_hash = hashlib.sha256(expected_data).hexdigest()
+        assert res == expected_hash
+        assert store.load(ns + "/" + res) == expected_data
+
+
 def test_hash(posixfs_store_created):
     ns = "two"
     k0 = key(0)

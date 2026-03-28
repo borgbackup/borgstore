@@ -17,7 +17,7 @@ import os
 import time
 from typing import Iterator, Optional
 
-from .utils.nesting import nest
+from .utils.nesting import nest, unnest
 from .backends._base import ItemInfo, BackendBase
 from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid  # noqa
 from .backends.posixfs import get_file_backend
@@ -281,6 +281,32 @@ class Store:
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
             self.backend.move(nested_name, nested_new_name)
+
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
+        """
+        efficiently create a new item (target) by combining blocks from existing items (sources)
+        in the same namespace. item and target names are always without namespace.
+
+        sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
+        in order of appearance in the list and their contents will be appended to the target item.
+
+        if the target name is not given, algorithm must be given to compute the target name
+        as hash(algorithm, target_content).hexdigest().
+
+        returns the target name.
+        """
+        prefix = (namespace + "/") if namespace else ""
+        mapped_sources = [
+            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
+        ]
+        if target is not None:
+            target = self.find(prefix + target, deleted=deleted)
+
+        levels = self._get_levels(prefix)[-1] if prefix else 0
+        backend_target = self.backend.defrag(
+            mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
+        )
+        return unnest(backend_target, namespace=prefix).removeprefix(prefix)
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         """

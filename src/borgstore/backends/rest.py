@@ -4,6 +4,7 @@ REST http client based backend implementation (use with borgstore.server.rest).
 
 import os
 import re
+import json
 from typing import Iterator, Dict, Optional
 from http import HTTPStatus as HTTP
 from urllib.parse import unquote
@@ -210,6 +211,22 @@ class REST(BackendBase):
         validate_name(new_name)
         response = self._request("post", self._url(""), params={"cmd": "move", "current": curr_name, "new": new_name})
         self._handle_response(response, f"{curr_name} -> {new_name}")
+
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:
+        self._assert_open()
+        params = {"cmd": "defrag"}
+        if target is not None:
+            params["target"] = target
+        if algorithm is not None:
+            params["algorithm"] = algorithm
+        if namespace is not None:
+            params["namespace"] = namespace
+        if levels:
+            params["levels"] = levels
+        data = json.dumps(sources).encode("utf-8")
+        response = self._request("post", self._url(""), params=params, data=data)
+        self._handle_response(response, "defrag")
+        return response.text
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         self._assert_open()
