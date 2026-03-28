@@ -65,7 +65,7 @@ testpaths = ["tests"]
 
 [tool.flake8]
 # Ignoring E203 due to https://github.com/PyCQA/pycodestyle/issues/373
-ignore = ['E226', 'W503', 'E203']
+ignore = ['E226', 'W503', 'E203', 'E402']
 max_line_length = 120
 exclude = ['build', 'dist', '.git', '.idea', '.mypy_cache', '.tox']
 
