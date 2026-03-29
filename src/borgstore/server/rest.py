@@ -1,3 +1,4 @@
+import hashlib
 import argparse
 import json
 import base64
@@ -201,7 +202,14 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         if self.name:
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
+                algorithm = "sha256"
+                expected_hash = self.headers.get(f"X-Content-hash-{algorithm}")
                 data = self.rfile.read(content_length)
+                if expected_hash:
+                    got_hash = hashlib.new(algorithm, data).hexdigest()
+                    if got_hash != expected_hash:
+                        self.respond(HTTP.UNPROCESSABLE_ENTITY, b"Content hash verification failed, please retry")
+                        return
                 with self.server.backend:
                     self.server.backend.store(self.name, data)
                 self.respond(HTTP.OK)

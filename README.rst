@@ -251,6 +251,8 @@ It can do some stuff server-side, which is usually not possible when using other
 cloud storage servers:
 
 - enforcing permissions
+- server rejects store operation if content hashsum does not match expected
+  hashsum (from http header X-Content-hash-sha256)
 - server-side hash computation (e.g. sha256) for item content
 - server-side defragmentation helper (copies blocks to new items)
 

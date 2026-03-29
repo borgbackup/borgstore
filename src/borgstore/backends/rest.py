@@ -5,6 +5,7 @@ REST http client based backend implementation (use with borgstore.server.rest).
 import os
 import re
 import json
+import hashlib
 from typing import Iterator, Dict, Optional
 from types import ModuleType
 from http import HTTPStatus as HTTP
@@ -202,7 +203,9 @@ class REST(BackendBase):
     def store(self, name: str, value: bytes) -> None:
         self._assert_open()
         validate_name(name)
-        response = self._request("post", self._url(name), data=value)
+        algorithm = "sha256"
+        headers = {f"X-Content-hash-{algorithm}": hashlib.new(algorithm, value).hexdigest()}
+        response = self._request("post", self._url(name), data=value, headers=headers)
         self._handle_response(response, name)
 
     def delete(self, name: str) -> None:
