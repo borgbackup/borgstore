@@ -434,3 +434,52 @@ def test_rest_backend_defrag(rest_server_with_auth):
 
     finally:
         be.close()
+
+
+def test_rest_content_hash_verification(rest_server_with_auth):
+    be = rest_server_with_auth
+    base_url = be.base_url + "/"
+    auth = be.auth
+    headers = {"Accept": "application/vnd.x.borgstore.rest.v1"}
+
+    be.create()
+    be.open()
+    try:
+        # 1. Test store with correct hash
+        data1 = b"some data, correct hash"
+        correct_hash = hashlib.sha256(data1).hexdigest()
+        h = headers.copy()
+        h["X-Content-hash-sha256"] = correct_hash
+
+        resp = requests.post(base_url + "item1", data=data1, auth=auth, headers=h)
+        assert resp.status_code == 200
+
+        # Verify it was stored
+        resp = requests.get(base_url + "item1", auth=auth, headers=headers)
+        assert resp.status_code == 200
+        assert resp.content == data1
+
+        # 2. Test failed store with incorrect hash
+        data2 = b"some data, wrong hash"
+        wrong_hash = hashlib.sha256(b"something else").hexdigest()
+        h = headers.copy()
+        h["X-Content-hash-sha256"] = wrong_hash
+
+        resp = requests.post(base_url + "item2", data=data2, auth=auth, headers=h)
+        assert resp.status_code == 422
+        assert "Content hash verification failed" in resp.text
+
+        # Verify it was NOT stored
+        resp = requests.get(base_url + "item2", auth=auth, headers=headers)
+        assert resp.status_code == 404
+
+        # 3. Test store without hash header (should still work)
+        data3 = b"some data, no hash"
+        resp = requests.post(base_url + "item3", data=data3, auth=auth, headers=headers)
+        assert resp.status_code == 200
+
+        resp = requests.get(base_url + "item3", auth=auth, headers=headers)
+        assert resp.status_code == 200
+        assert resp.content == data3
+    finally:
+        be.close()
