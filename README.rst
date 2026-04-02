@@ -114,6 +114,14 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
+- Quota: tracks backend storage size and rejects ``store`` if quota is exceeded.
+
+  The current usage is persisted to a hidden file in the storage directory.
+
+  When quota tracking is enabled on a backend that already contains data,
+  the server automatically scans the directories at ``open`` time (that may
+  take a while if there are many files). That scan can be avoided by always
+  using quotas.
 - Permissions: This backend can enforce a simple, test-friendly permission system
   and raises ``PermissionDenied`` if access is not permitted by the configuration.
 
@@ -343,6 +351,27 @@ Hierarchical rules (list-only at root, read/write in ``data/``)::
             --username user --password pass \
             --backend file:///tmp/teststore \
             --permissions '{"": "l", "data": "lrw"}'
+
+Quota
+~~~~~
+
+The REST server, when used with the ``file:`` backend,  optionally supports
+quota tracking and enforcement.
+
+Use the ``--quota`` argument to set a maximum storage size in bytes (default is
+no quota tracking and enforcement).
+
+When the quota is exceeded, ``store`` operations are rejected with HTTP 507
+(Insufficient Storage).
+
+Example — limit storage to 1 GiB:
+
+.. code-block:: bash
+
+    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \\
+            --username user --password pass \\
+            --backend file:///tmp/teststore \\
+            --quota 1073741824
 
 
 Scalability

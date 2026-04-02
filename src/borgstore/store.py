@@ -30,14 +30,17 @@ from .constants import DEL_SUFFIX
 logger = logging.getLogger(__name__)
 
 
-def get_backend(url, permissions=None):
+def get_backend(url, permissions=None, quota=None):
     """Parse backend URL and return a backend instance (or None)."""
-    backend = get_file_backend(url, permissions=permissions)
+    backend = get_file_backend(url, permissions=permissions, quota=quota)
     if backend is not None:
         return backend
 
     if permissions is not None:
         raise ValueError("Permissions are only supported for the 'file:' backend.")
+
+    if quota is not None:
+        raise ValueError("Quota is only supported for the 'file:' backend.")
 
     backend = get_sftp_backend(url)
     if backend is not None:

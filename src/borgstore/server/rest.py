@@ -12,6 +12,7 @@ from ..backends.errors import (
     BackendAlreadyExists,
     BackendDoesNotExist,
     PermissionDenied,
+    QuotaExceeded,
     BackendError,
     BackendMustBeOpen,
     BackendMustNotBeOpen,
@@ -119,6 +120,8 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTP.PRECONDITION_FAILED, str(e))
         elif isinstance(e, PermissionDenied):
             self.send_error(HTTP.FORBIDDEN, str(e))
+        elif isinstance(e, QuotaExceeded):
+            self.send_error(HTTP.INSUFFICIENT_STORAGE, str(e))
         elif isinstance(e, (ValueError, TypeError)):
             self.send_error(HTTP.BAD_REQUEST, str(e))
             logger.exception("Exception for %s", name or self.path)
@@ -356,8 +359,8 @@ def resolve_permissions(permissions):
         raise ValueError(f"Invalid --permissions value: {permissions!r}. Use a shortcut ({valid}) or a JSON object.")
 
 
-def serve(host, port, backend_url, username=None, password=None, permissions=None):
-    backend = get_backend(backend_url, permissions=permissions)
+def serve(host, port, backend_url, username=None, password=None, permissions=None, quota=None):
+    backend = get_backend(backend_url, permissions=permissions, quota=quota)
     if backend is None:
         raise ValueError(f"Invalid backend URL: {backend_url}")
     server = BorgStoreRESTServer((host, port), backend, username, password)
@@ -380,6 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("--username", help="Basic Auth username")
     parser.add_argument("--password", help="Basic Auth password")
     parser.add_argument("--permissions", help="Permissions: a shortcut name or a JSON object string.")
+    parser.add_argument("--quota", type=int, default=None, help="Quota in bytes.")
     args = parser.parse_args()
     permissions = resolve_permissions(args.permissions)
-    serve(args.host, args.port, args.backend, args.username, args.password, permissions)
+    serve(args.host, args.port, args.backend, args.username, args.password, permissions, args.quota)

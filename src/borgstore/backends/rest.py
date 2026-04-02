@@ -29,6 +29,7 @@ from .errors import (
     BackendAlreadyExists,
     BackendDoesNotExist,
     PermissionDenied,
+    QuotaExceeded,
     BackendError,
     BackendMustBeOpen,
     BackendMustNotBeOpen,
@@ -127,6 +128,8 @@ class REST(BackendBase):
             raise BackendError(response.text)
         if response.status_code == HTTP.FORBIDDEN:
             raise PermissionDenied(name or self.base_url)
+        if response.status_code == HTTP.INSUFFICIENT_STORAGE:
+            raise QuotaExceeded(response.text)
         if response.status_code == HTTP.BAD_REQUEST:
             raise ValueError(response.text)
         response.raise_for_status()

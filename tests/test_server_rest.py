@@ -11,13 +11,13 @@ from borgstore.constants import DEL_SUFFIX
 from borgstore.server.rest import BorgStoreRESTServer
 from borgstore.backends.rest import get_rest_backend
 from borgstore.backends.posixfs import get_file_backend
-from borgstore.backends.errors import ObjectNotFound, BackendAlreadyExists
+from borgstore.backends.errors import ObjectNotFound, BackendAlreadyExists, QuotaExceeded
 
 
-def start_server(backend_url, address, port, username=None, password=None, permissions=None):
+def start_server(backend_url, address, port, username=None, password=None, permissions=None, quota=None):
     from borgstore.store import get_backend
 
-    backend = get_backend(backend_url, permissions=permissions)
+    backend = get_backend(backend_url, permissions=permissions, quota=quota)
     server = BorgStoreRESTServer((address, port), backend, username, password)
     ready = threading.Event()
 
@@ -481,5 +481,59 @@ def test_rest_content_hash_verification(rest_server_with_auth):
         resp = requests.get(base_url + "item3", auth=auth, headers=headers)
         assert resp.status_code == 200
         assert resp.content == data3
+    finally:
+        be.close()
+
+
+@pytest.fixture
+def rest_server_with_quota(tmp_path):
+    backend_url = tmp_path.as_uri()
+    address, port = "127.0.0.1", 0
+    username, password = "testuser", "testpassword"
+    quota = 1000  # 1000 bytes
+
+    server, thread = start_server(backend_url, address, port, username, password, quota=quota)
+
+    host, assigned_port = server.server_address
+    backend = get_rest_backend(f"http://{username}:{password}@{host}:{assigned_port}/")
+    yield backend
+
+    server.shutdown()
+    server.server_close()
+
+
+def test_rest_server_quota_enforced(rest_server_with_quota):
+    """Quota is enforced via the REST server: stores within quota succeed, exceeding quota raises QuotaExceeded."""
+    be = rest_server_with_quota
+    be.create()
+    be.open()
+    try:
+        # Store within quota should succeed
+        be.store("obj1", b"x" * 500)
+        assert be.load("obj1") == b"x" * 500
+
+        # Store that would exceed quota should fail
+        with pytest.raises(QuotaExceeded):
+            be.store("obj2", b"x" * 600)
+
+        # Original object should still be intact
+        assert be.load("obj1") == b"x" * 500
+
+        # After deleting, we should have room again
+        be.delete("obj1")
+        be.store("obj3", b"x" * 900)
+        assert be.load("obj3") == b"x" * 900
+    finally:
+        be.close()
+
+
+def test_rest_server_no_quota(rest_server_with_auth):
+    """Without quota, large stores succeed."""
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        be.store("bigobj", b"x" * 100000)
+        assert be.load("bigobj") == b"x" * 100000
     finally:
         be.close()
