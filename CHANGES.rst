@@ -6,7 +6,9 @@ Version 0.x.x (not released yet)
 
 New features:
 
+- quota: implement quota tracking and enforcement (posixfs), #19
 - load: implement tail loading support (negative offset)
+- store: hashsum content verification (REST server/client), #148
 - defrag: defragmentation helper (copies blocks from source to target items)
 - hash: item content hashing, e.g. sha256
 - REST server: server-side implementation of defrag and hash
