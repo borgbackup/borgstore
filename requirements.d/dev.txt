@@ -1,4 +1,3 @@
-black >=26.0, <27
 tox
 pytest
 build
