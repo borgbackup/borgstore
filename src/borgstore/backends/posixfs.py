@@ -69,7 +69,7 @@ class PosixFS(BackendBase):
         self.opened = False
         self.do_fsync = do_fsync  # False = 26x faster, see #10
         self.permissions = permissions or {}  # name [str] -> granted_permissions [str]
-        self.quota = quota  # maximum allowed storage size in bytes, None means unlimited
+        self.quota_limit = quota  # maximum allowed storage size in bytes, None means unlimited
         self._quota_use = 0  # current tracked storage usage in bytes
         self._quota_use_persisted = 0  # last persisted value
         self._quota_last_persist_time = 0.0  # monotonic time of last persist
@@ -156,7 +156,7 @@ class PosixFS(BackendBase):
             raise BackendDoesNotExist(
                 f"posixfs storage base path does not exist or is not a directory: {self.base_path}"
             )
-        if self.quota is not None:
+        if self.quota_limit is not None:
             self._quota_persist(0)
         else:
             self._quota_delete()
@@ -165,7 +165,7 @@ class PosixFS(BackendBase):
     def close(self):
         if not self.opened:
             raise BackendMustBeOpen()
-        if self.quota is not None:
+        if self.quota_limit is not None:
             self._quota_update(0, force=True)
         self.opened = False
 
@@ -235,12 +235,12 @@ class PosixFS(BackendBase):
         path = self._validate_join(name)
         overwrite = path.exists()
         self._check_permission(name, "W" if overwrite else "wW")
-        if self.quota is not None:
+        if self.quota_limit is not None:
             old_size = path.stat().st_size if overwrite else 0
             new_size = len(value)
             delta = new_size - old_size
-            if self._quota_use + delta > self.quota:
-                raise QuotaExceeded(f"Quota exceeded: {self._quota_use + delta} > {self.quota}")
+            if self._quota_use + delta > self.quota_limit:
+                raise QuotaExceeded(f"Quota exceeded: {self._quota_use + delta} > {self.quota_limit}")
         tmp_dir = path.parent
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
@@ -260,7 +260,7 @@ class PosixFS(BackendBase):
         except OSError:
             tmp_path.unlink()
             raise
-        if self.quota is not None:
+        if self.quota_limit is not None:
             self._quota_update(delta)
 
     def delete(self, name):
@@ -269,12 +269,12 @@ class PosixFS(BackendBase):
         path = self._validate_join(name)
         self._check_permission(name, "D")
         try:
-            if self.quota is not None:
+            if self.quota_limit is not None:
                 size = path.stat().st_size
             path.unlink()
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
-        if self.quota is not None:
+        if self.quota_limit is not None:
             self._quota_update(-size)
 
     def move(self, curr_name, new_name):
@@ -362,6 +362,12 @@ class PosixFS(BackendBase):
                     else:
                         is_dir = stat.S_ISDIR(st.st_mode)
                         yield ItemInfo(name=p.name, exists=True, size=st.st_size, directory=is_dir)
+
+    def quota(self) -> dict:
+        """Return quota information: limit and usage in bytes. -1 means not set / not tracked."""
+        if self.quota_limit is None:
+            return dict(limit=-1, usage=-1)
+        return dict(limit=self.quota_limit, usage=self._quota_use)
 
     def _quota_path(self):
         return self.base_path / QUOTA_STORE_NAME

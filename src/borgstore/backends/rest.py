@@ -240,6 +240,12 @@ class REST(BackendBase):
         self._handle_response(response, "defrag")
         return response.text
 
+    def quota(self) -> dict:
+        self._assert_open()
+        response = self._request("post", self._url(""), params={"cmd": "quota"})
+        self._handle_response(response, "quota")
+        return response.json()
+
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         self._assert_open()
         validate_name(name)

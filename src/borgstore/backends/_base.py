@@ -159,6 +159,10 @@ class BackendBase(ABC):
         h.update(self.load(name))
         return h.hexdigest()
 
+    def quota(self) -> dict:
+        """Return quota information: limit and usage in bytes. -1 means not set / not tracked."""
+        return dict(limit=-1, usage=-1)
+
     @abstractmethod
     def list(self, name: str) -> Iterator[ItemInfo]:
         """list the contents of <name>, non-recursively.

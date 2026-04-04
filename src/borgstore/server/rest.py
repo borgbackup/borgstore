@@ -179,6 +179,16 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 self._handle_exception(e, f"hash {self.name}")
             return
 
+        if cmd == "quota":
+            try:
+                with self.server.backend:
+                    quota_info = self.server.backend.quota()
+                response_data = json.dumps(quota_info).encode("utf-8")
+                self.respond(HTTP.OK, data=response_data, content_type="application/json")
+            except Exception as e:
+                self._handle_exception(e, "quota")
+            return
+
         if cmd == "defrag":
             target = self.query.get("target", [None])[0]
             algorithm = self.query.get("algorithm", [None])[0]

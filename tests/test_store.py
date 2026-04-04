@@ -7,6 +7,7 @@ import pytest
 
 from . import key, list_store_names, list_store_names_sorted
 from .test_backends import get_posixfs_test_backend  # noqa
+from borgstore.backends.posixfs import PosixFS
 from .test_backends import get_sftp_test_backend, sftp_is_available  # noqa
 from .test_backends import get_rclone_test_backend, rclone_is_available  # noqa
 from .test_backends import get_s3_test_backend, s3_is_available  # noqa
@@ -381,3 +382,28 @@ def test_stats(posixfs_store_created):
         assert store._stats["load_volume"] == 100
         store.load(key)
         assert store._stats["load_volume"] == 200
+
+
+def test_quota_no_quota(posixfs_store_created):
+    with posixfs_store_created as store:
+        q = store.quota()
+        assert q == dict(limit=-1, usage=-1)
+
+
+def test_quota_with_quota(tmp_path):
+    quota_limit = 1000000
+    be = PosixFS(tmp_path / "store", quota=quota_limit)
+    store = Store(backend=be, levels=LEVELS_CONFIG)
+    store.create()
+    try:
+        with store:
+            q = store.quota()
+            assert q["limit"] == quota_limit
+            assert q["usage"] == 0
+            # store some data and check usage updates
+            store.store("two/" + key(0), b"x" * 1000)
+            q = store.quota()
+            assert q["limit"] == quota_limit
+            assert q["usage"] == 1000
+    finally:
+        store.destroy()

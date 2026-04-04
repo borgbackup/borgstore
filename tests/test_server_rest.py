@@ -537,3 +537,34 @@ def test_rest_server_no_quota(rest_server_with_auth):
         assert be.load("bigobj") == b"x" * 100000
     finally:
         be.close()
+
+
+def test_rest_server_quota_method_with_quota(rest_server_with_quota):
+    """quota() returns limit and usage when quota is set."""
+    be = rest_server_with_quota
+    be.create()
+    be.open()
+    try:
+        q = be.quota()
+        assert q["limit"] == 1000
+        assert q["usage"] == 0
+
+        be.store("obj1", b"x" * 500)
+        q = be.quota()
+        assert q["limit"] == 1000
+        assert q["usage"] == 500
+    finally:
+        be.close()
+
+
+def test_rest_server_quota_method_no_quota(rest_server_with_auth):
+    """quota() returns -1/-1 when no quota is configured."""
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        q = be.quota()
+        assert q["limit"] == -1
+        assert q["usage"] == -1
+    finally:
+        be.close()

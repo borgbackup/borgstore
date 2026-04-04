@@ -138,6 +138,9 @@ class Store:
     def close(self) -> None:
         self.backend.close()
 
+    def quota(self) -> dict:
+        return self.backend.quota()
+
     @contextmanager
     def _stats_updater(self, key, msg):
         """update call counters and overall times, also emulate latency and bandwidth"""
