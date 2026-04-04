@@ -53,6 +53,7 @@ API can be much simpler:
 - move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
 - defrag: general purpose defragmentation helper (copies blocks to new items)
+- quota: return quota limit and usage (-1 if quotas not enabled or not supported)
 - stats: API call counters, time spent in API methods, data volume/throughput.
 - latency/bandwidth emulator: can emulate higher latency (via BORGSTORE_LATENCY
   [us]) and lower bandwidth (via BORGSTORE_BANDWIDTH [bit/s]) than what is
@@ -114,6 +115,14 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
+- Quota: tracks backend storage size and rejects ``store`` if quota is exceeded.
+
+  The current usage is persisted to a hidden file in the storage directory.
+
+  When quota tracking is enabled on a backend that already contains data,
+  the server automatically scans the directories at ``open`` time (that may
+  take a while if there are many files). That scan can be avoided by always
+  using quotas.
 - Permissions: This backend can enforce a simple, test-friendly permission system
   and raises ``PermissionDenied`` if access is not permitted by the configuration.
 
@@ -343,6 +352,27 @@ Hierarchical rules (list-only at root, read/write in ``data/``)::
             --username user --password pass \
             --backend file:///tmp/teststore \
             --permissions '{"": "l", "data": "lrw"}'
+
+Quota
+~~~~~
+
+The REST server, when used with the ``file:`` backend,  optionally supports
+quota tracking and enforcement.
+
+Use the ``--quota`` argument to set a maximum storage size in bytes (default is
+no quota tracking and enforcement).
+
+When the quota is exceeded, ``store`` operations are rejected with HTTP 507
+(Insufficient Storage).
+
+Example — limit storage to 1 GiB:
+
+.. code-block:: bash
+
+    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \\
+            --username user --password pass \\
+            --backend file:///tmp/teststore \\
+            --quota 1073741824
 
 
 Scalability

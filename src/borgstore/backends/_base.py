@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Iterator
 
-from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX
+from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX, HID_SUFFIX
 
 ItemInfo = namedtuple("ItemInfo", "name exists size directory")
 
@@ -45,6 +45,9 @@ def validate_name(name):
     if name.endswith(TMP_SUFFIX):
         # TMP_SUFFIX is used for temporary files internally, e.g. while files are uploading.
         raise ValueError(f"name must not end with {TMP_SUFFIX}, but got: {name}")
+    if name.endswith(HID_SUFFIX):
+        # HID_SUFFIX is used for hidden internal files, not accessible by users.
+        raise ValueError(f"name must not end with {HID_SUFFIX}, but got: {name}")
 
 
 class BackendBase(ABC):
@@ -155,6 +158,10 @@ class BackendBase(ABC):
             raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
         h.update(self.load(name))
         return h.hexdigest()
+
+    def quota(self) -> dict:
+        """Return quota information: limit and usage in bytes. -1 means not set / not tracked."""
+        return dict(limit=-1, usage=-1)
 
     @abstractmethod
     def list(self, name: str) -> Iterator[ItemInfo]:

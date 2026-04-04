@@ -29,6 +29,7 @@ from .errors import (
     BackendAlreadyExists,
     BackendDoesNotExist,
     PermissionDenied,
+    QuotaExceeded,
     BackendError,
     BackendMustBeOpen,
     BackendMustNotBeOpen,
@@ -127,6 +128,8 @@ class REST(BackendBase):
             raise BackendError(response.text)
         if response.status_code == HTTP.FORBIDDEN:
             raise PermissionDenied(name or self.base_url)
+        if response.status_code == HTTP.INSUFFICIENT_STORAGE:
+            raise QuotaExceeded(response.text)
         if response.status_code == HTTP.BAD_REQUEST:
             raise ValueError(response.text)
         response.raise_for_status()
@@ -236,6 +239,12 @@ class REST(BackendBase):
         response = self._request("post", self._url(""), params=params, data=data)
         self._handle_response(response, "defrag")
         return response.text
+
+    def quota(self) -> dict:
+        self._assert_open()
+        response = self._request("post", self._url(""), params={"cmd": "quota"})
+        self._handle_response(response, "quota")
+        return response.json()
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:
         self._assert_open()

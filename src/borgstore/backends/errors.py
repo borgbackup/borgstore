@@ -37,3 +37,7 @@ class ObjectNotFound(BackendError):
 
 class PermissionDenied(BackendError):
     """Permission denied for the requested operation."""
+
+
+class QuotaExceeded(BackendError):
+    """Quota exceeded for the requested operation."""

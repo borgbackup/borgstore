@@ -6,19 +6,29 @@ import hashlib
 import os
 import re
 import sys
+import time
 from urllib.parse import unquote
 from pathlib import Path
 import shutil
 import stat
 import tempfile
+import types
+
+is_win32 = sys.platform == "win32"
+
+fcntl: types.ModuleType | None
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # not available on Windows
 
 from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen
-from .errors import ObjectNotFound, PermissionDenied
-from ..constants import TMP_SUFFIX
+from .errors import ObjectNotFound, PermissionDenied, QuotaExceeded
+from ..constants import TMP_SUFFIX, QUOTA_STORE_NAME, QUOTA_PERSIST_DELTA, QUOTA_PERSIST_INTERVAL
 
 
-def get_file_backend(url, permissions=None):
+def get_file_backend(url, permissions=None, quota=None):
     # file:///absolute/path
     # notes:
     # - we only support **local** fs **absolute** paths.
@@ -42,23 +52,27 @@ def get_file_backend(url, permissions=None):
     if sys.platform in ("win32", "msys", "cygwin"):
         m = re.match(windows_file_regex, url, re.VERBOSE)
         if m:
-            return PosixFS(path=unquote(m["drive_and_path"]), permissions=permissions)
+            return PosixFS(path=unquote(m["drive_and_path"]), permissions=permissions, quota=quota)
     m = re.match(file_regex, url, re.VERBOSE)
     if m:
-        return PosixFS(path=unquote(m["path"]), permissions=permissions)
+        return PosixFS(path=unquote(m["path"]), permissions=permissions, quota=quota)
 
 
 class PosixFS(BackendBase):
     # PosixFS implementation supports precreate = True as well as = False.
     precreate_dirs: bool = False
 
-    def __init__(self, path, *, do_fsync=False, permissions=None):
+    def __init__(self, path, *, do_fsync=False, permissions=None, quota=None):
         self.base_path = Path(path)
         if not self.base_path.is_absolute():
             raise BackendError(f"path must be an absolute path: {path}")
         self.opened = False
         self.do_fsync = do_fsync  # False = 26x faster, see #10
         self.permissions = permissions or {}  # name [str] -> granted_permissions [str]
+        self.quota_limit = quota  # maximum allowed storage size in bytes, None means unlimited
+        self._quota_use = 0  # current tracked storage usage in bytes
+        self._quota_use_persisted = 0  # last persisted value
+        self._quota_last_persist_time = 0.0  # monotonic time of last persist
 
     def _check_permission(self, name, required_permissions):
         """
@@ -142,11 +156,17 @@ class PosixFS(BackendBase):
             raise BackendDoesNotExist(
                 f"posixfs storage base path does not exist or is not a directory: {self.base_path}"
             )
+        if self.quota_limit is not None:
+            self._quota_persist(0)
+        else:
+            self._quota_delete()
         self.opened = True
 
     def close(self):
         if not self.opened:
             raise BackendMustBeOpen()
+        if self.quota_limit is not None:
+            self._quota_update(0, force=True)
         self.opened = False
 
     def _validate_join(self, name):
@@ -200,39 +220,48 @@ class PosixFS(BackendBase):
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
 
-    def store(self, name, value):
-        def _write_to_tmpfile():
-            with tempfile.NamedTemporaryFile(suffix=TMP_SUFFIX, dir=tmp_dir, delete=False) as f:
-                f.write(value)
-                if self.do_fsync:
-                    f.flush()
-                    os.fsync(f.fileno())
-                tmp_path = Path(f.name)
-            return tmp_path
+    def _write_to_tempfile(self, path, value, suffix=TMP_SUFFIX, do_fsync=False):
+        with tempfile.NamedTemporaryFile(suffix=suffix, dir=path, delete=False) as f:
+            f.write(value)
+            if do_fsync:
+                f.flush()
+                os.fsync(f.fileno())
+            tmp_path = Path(f.name)
+        return tmp_path
 
+    def store(self, name, value):
         if not self.opened:
             raise BackendMustBeOpen()
         path = self._validate_join(name)
-        self._check_permission(name, "W" if path.exists() else "wW")
+        overwrite = path.exists()
+        self._check_permission(name, "W" if overwrite else "wW")
+        if self.quota_limit is not None:
+            old_size = path.stat().st_size if overwrite else 0
+            new_size = len(value)
+            delta = new_size - old_size
+            if self._quota_use + delta > self.quota_limit:
+                raise QuotaExceeded(f"Quota exceeded: {self._quota_use + delta} > {self.quota_limit}")
         tmp_dir = path.parent
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.
         try:
             # try to do it quickly, not doing the mkdir. fs ops might be slow, esp. on network fs (latency).
             # this will frequently succeed, because the dir is already there.
-            tmp_path = _write_to_tmpfile()
+            tmp_path = self._write_to_tempfile(tmp_dir, value, do_fsync=self.do_fsync)
         except FileNotFoundError:
             # retry, create potentially missing dirs first. this covers these cases:
             # - either the dirs were not precreated
             # - a previously existing directory was "lost" in the filesystem
             tmp_dir.mkdir(parents=True, exist_ok=True)
-            tmp_path = _write_to_tmpfile()
+            tmp_path = self._write_to_tempfile(tmp_dir, value, do_fsync=self.do_fsync)
         # all written and synced to disk, rename it to the final name:
         try:
             tmp_path.replace(path)
         except OSError:
             tmp_path.unlink()
             raise
+        if self.quota_limit is not None:
+            self._quota_update(delta)
 
     def delete(self, name):
         if not self.opened:
@@ -240,9 +269,13 @@ class PosixFS(BackendBase):
         path = self._validate_join(name)
         self._check_permission(name, "D")
         try:
+            if self.quota_limit is not None:
+                size = path.stat().st_size
             path.unlink()
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
+        if self.quota_limit is not None:
+            self._quota_update(-size)
 
     def move(self, curr_name, new_name):
         def _rename_to_new_name():
@@ -329,3 +362,96 @@ class PosixFS(BackendBase):
                     else:
                         is_dir = stat.S_ISDIR(st.st_mode)
                         yield ItemInfo(name=p.name, exists=True, size=st.st_size, directory=is_dir)
+
+    def quota(self) -> dict:
+        """Return quota information: limit and usage in bytes. -1 means not set / not tracked."""
+        if self.quota_limit is None:
+            return dict(limit=-1, usage=-1)
+        return dict(limit=self.quota_limit, usage=self._quota_use)
+
+    def _quota_path(self):
+        return self.base_path / QUOTA_STORE_NAME
+
+    def _quota_scan(self, path, skips):
+        """Scan the filesystem to determine actual storage usage."""
+        total = 0
+        with os.scandir(path) as it:
+            for entry in it:
+                if entry.is_file(follow_symlinks=False):
+                    if os.path.abspath(entry.path) not in skips:
+                        total += entry.stat(follow_symlinks=False).st_size
+                elif entry.is_dir(follow_symlinks=False):
+                    total += self._quota_scan(entry.path, skips)
+        return total
+
+    def _quota_persist(self, delta):
+        """Persist quota usage to the on-disk quota file.
+
+        To support concurrent sessions, this method applies the given *delta*
+        to the current on-disk value under an exclusive file lock.  This way,
+        updates from other sessions are preserved.
+
+        If the quota file does not exist or contains an invalid value, a
+        filesystem scan is performed to determine the actual usage.
+
+        The quota file itself is used as the lock file (opened and locked
+        with flock) so no separate lock file is needed.
+        """
+        quota_path = self._quota_path()
+        try:
+            fd = os.open(str(quota_path), os.O_RDONLY)
+        except FileNotFoundError:
+            # quota file missing, scan filesystem to determine usage
+            skips = {os.path.abspath(quota_path)}
+            quota_use = self._quota_scan(self.base_path, skips)
+            quota_path.write_text(str(quota_use))
+            self._quota_use_persisted = quota_use
+            self._quota_use = quota_use
+            self._quota_last_persist_time = time.monotonic()
+            return
+        try:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            # read current on-disk value (may have been updated by another session)
+            try:
+                on_disk = int(os.read(fd, 100))
+            except ValueError:
+                # invalid content, scan filesystem to determine usage
+                skips = {os.path.abspath(quota_path)}
+                on_disk = self._quota_scan(self.base_path, skips)
+                delta = 0  # scan already gives the true value
+            if is_win32:
+                # Close the file before replacing to avoid AccessDenied on Windows.
+                os.close(fd)
+                fd = -1
+            new_value = max(on_disk + delta, 0)
+            quota_content = str(new_value).encode()
+            tmp_path = self._write_to_tempfile(quota_path.parent, quota_content, do_fsync=True)
+            try:
+                tmp_path.replace(quota_path)  # atomic update
+            except OSError:
+                tmp_path.unlink()
+                raise
+            self._quota_use_persisted = new_value
+            self._quota_use = new_value  # re-sync with on-disk truth
+            self._quota_last_persist_time = time.monotonic()
+        finally:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            if fd >= 0:
+                os.close(fd)
+
+    def _quota_update(self, delta, force=False):
+        """Update quota usage by delta and persist if the change is significant or enough time has elapsed."""
+        self._quota_use += delta
+        persist_delta = self._quota_use - self._quota_use_persisted
+        elapsed = time.monotonic() - self._quota_last_persist_time
+        if force or abs(persist_delta) >= QUOTA_PERSIST_DELTA or elapsed >= QUOTA_PERSIST_INTERVAL:
+            self._quota_persist(persist_delta)
+
+    def _quota_delete(self):
+        """Delete the quota file if it exists."""
+        try:
+            self._quota_path().unlink()
+        except FileNotFoundError:
+            pass
