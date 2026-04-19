@@ -51,7 +51,7 @@ def get_rest_backend(base_url: str):
         (?P<scheme>http|https)://
         ((?P<username>[^:]+):(?P<password>[^@]+)@)?
         (?P<host>[^:/]+)(:(?P<port>\d+))?
-        (?P<path>/)
+        (?P<path>/.*)?
     """
     m = re.match(http_regex, base_url, re.VERBOSE)
     if m:
