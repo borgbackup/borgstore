@@ -292,10 +292,11 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 # send a JSON list of objects
                 # [{"name": "...", "size": ...}, ...]
                 with self.server.backend:
-                    items = list(self.server.backend.list(self.name))
-                json_data = json.dumps(
-                    [{"name": item.name, "size": item.size, "directory": item.directory} for item in items], indent=2
-                )
+                    items = (
+                        {"name": item.name, "size": item.size, "directory": item.directory}
+                        for item in self.server.backend.list(self.name)
+                    )
+                    json_data = json.dumps(list(items), indent=2)
                 response_data = json_data.encode("utf-8")
                 self.respond(HTTP.OK, data=response_data, content_type="application/json")
             except Exception as e:
