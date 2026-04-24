@@ -333,6 +333,14 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
 
 class BorgStoreRESTServer(ThreadingHTTPServer):
+    """
+    BorgStore REST Server.
+
+    Security Warning:
+    This server does not implement TLS. In a production environment, it SHOULD
+    be run behind a reverse proxy (like Nginx or Caddy) that provides HTTPS.
+    """
+
     disable_nagle_algorithm = True  # aka TCP_NODELAY, reduces latency
 
     def __init__(self, server_address, backend, username=None, password=None):
