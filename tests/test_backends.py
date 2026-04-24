@@ -126,10 +126,60 @@ def check_s3_available():
         return True
 
 
+def get_rest1_test_backend():
+    # export BORGSTORE_TEST_REST1_URL="http://user:pass@host/repos/repo1/"
+    # Used for testing the nginx reverse proxy → borgstore REST server path.
+    url = os.environ.get("BORGSTORE_TEST_REST1_URL")
+    if not url:
+        return None
+    return get_rest_backend(url)
+
+
+def check_rest1_available():
+    """Check whether the nginx-proxied REST backend 1 is reachable."""
+    try:
+        be = get_rest1_test_backend()
+        if be is None:
+            return False
+        be.create()
+    except Exception as e:
+        print(f"REST1 backend create failed {repr(e)}")
+        return False
+    else:
+        be.destroy()
+        return True
+
+
+def get_rest2_test_backend():
+    # export BORGSTORE_TEST_REST2_URL="http://user:pass@host/repos/repo2/"
+    # Used for testing the nginx reverse proxy → borgstore REST server path.
+    url = os.environ.get("BORGSTORE_TEST_REST2_URL")
+    if not url:
+        return None
+    return get_rest_backend(url)
+
+
+def check_rest2_available():
+    """Check whether the nginx-proxied REST backend 2 is reachable."""
+    try:
+        be = get_rest2_test_backend()
+        if be is None:
+            return False
+        be.create()
+    except Exception as e:
+        print(f"REST2 backend create failed {repr(e)}")
+        return False
+    else:
+        be.destroy()
+        return True
+
+
 sftp_is_available = check_sftp_available()
 rclone_is_available = requests is not None and check_rclone_available()
 s3_is_available = check_s3_available()
 rest_is_available = requests is not None
+rest1_is_available = rest_is_available and check_rest1_available()
+rest2_is_available = rest_is_available and check_rest2_available()
 
 
 @pytest.fixture(scope="function")
@@ -155,6 +205,26 @@ def rclone_backend_created():
 @pytest.fixture(scope="function")
 def s3_backend_created():
     be = get_s3_test_backend()
+    be.create()
+    try:
+        yield be
+    finally:
+        be.destroy()
+
+
+@pytest.fixture(scope="function")
+def rest1_backend_created():
+    be = get_rest1_test_backend()
+    be.create()
+    try:
+        yield be
+    finally:
+        be.destroy()
+
+
+@pytest.fixture(scope="function")
+def rest2_backend_created():
+    be = get_rest2_test_backend()
     be.create()
     try:
         yield be
@@ -191,6 +261,10 @@ def pytest_generate_tests(metafunc):
         tested_backends = ["posixfs_backend_created"]
         if rest_is_available:
             tested_backends += ["rest_backend_created"]
+        if rest1_is_available:
+            tested_backends += ["rest1_backend_created"]
+        if rest2_is_available:
+            tested_backends += ["rest2_backend_created"]
         if sftp_is_available:
             tested_backends += ["sftp_backend_created"]
         if rclone_is_available:
@@ -627,3 +701,32 @@ def test_hash(tested_backends, request):
     # Test must be open
     with pytest.raises(BackendMustBeOpen):
         backend.hash("test/item")
+
+
+@pytest.mark.skipif(not (rest1_is_available and rest2_is_available), reason="REST1 and REST2 backends not available")
+def test_nginx_dispatch(rest1_backend_created, rest2_backend_created):
+    """
+    Verify that Nginx correctly dispatches requests to two different
+    borgstore server instances (based on the URL path).
+    """
+    be1 = rest1_backend_created
+    be2 = rest2_backend_created
+
+    with be1, be2:
+        key = "dispatch-test-object"
+        value1 = b"content-for-repo1"
+        value2 = b"content-for-repo2"
+
+        be1.store(key, value1)
+        be2.store(key, value2)
+
+        assert be1.load(key) == value1, "Backend1 content mismatch!"
+        assert be2.load(key) == value2, "Backend2 content mismatch!"
+
+        key = "only-in-repo1"
+        value = b"content-for-repo1-only"
+        be1.store(key, value)
+
+        assert be1.load(key) == value, "Backend1 content mismatch!"
+        with pytest.raises(ObjectNotFound):
+            be2.load(key)

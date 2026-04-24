@@ -40,7 +40,7 @@ jobs:
             - os: ubuntu-24.04
               python-version: '3.11'
               toxenv: mypy
-            - os: ubuntu-22.04
+            - os: ubuntu-24.04
               python-version: '3.10'
               toxenv: py310
             - os: ubuntu-24.04
@@ -136,6 +136,65 @@ jobs:
         mc mb --ignore-existing local/test
         # Export S3 test URL for tox via GITHUB_ENV
         echo "BORGSTORE_TEST_S3_URL=s3:minioadmin:minioadmin@http://127.0.0.1:9000/test/path" >> $GITHUB_ENV
+    - name: Configure nginx + borgstore REST server via systemd socket activation (test only)
+      if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
+      run: |
+        set -e
+        sudo apt-get install -y nginx
+
+        # Create borgstore system user (matches contrib/server/nginx-systemd/borgstore@.service)
+        sudo useradd --system --home /srv/borgstore --shell /usr/sbin/nologin borgstore || true
+        # Add the web server user (www-data) to the borgstore group so it can connect
+        # to the unix sockets (which are owned by borgstore:borgstore or borgstore:www-data).
+        sudo usermod -aG borgstore www-data || true
+
+        # Install borgstore[rest] to the system Python so the borgstore service user can run it.
+        # Must NOT use -e (editable): the service runs with ProtectHome=true, which makes
+        # /home inaccessible. An editable install leaves a .pth pointing to the workspace
+        # under /home/runner/work/, so the import would fail at service start. A regular
+        # install copies the package into system site-packages (/usr/lib/python3/...) which
+        # is always accessible.
+        sudo pip3 install --break-system-packages ".[rest]"
+
+        # Running pip3 as root may have changed ownership of src, so we fix that.
+        sudo chown -R $USER:$USER src/
+
+        # Create backend directories for the two test repos
+        sudo mkdir -p /srv/borgstore/repos/repo1 /srv/borgstore/repos/repo2
+        sudo chown -R borgstore:borgstore /srv/borgstore/
+
+        # Create env files for both repos (format from contrib/server/nginx-systemd/repo1.env.example)
+        sudo mkdir -p /etc/borgstore
+        printf 'BORGSTORE_BACKEND=file:///srv/borgstore/repos/repo1\nBORGSTORE_USERNAME=testuser\nBORGSTORE_PASSWORD=testpass\n' \
+          | sudo tee /etc/borgstore/repo1.env > /dev/null
+        printf 'BORGSTORE_BACKEND=file:///srv/borgstore/repos/repo2\nBORGSTORE_USERNAME=testuser\nBORGSTORE_PASSWORD=testpass\n' \
+          | sudo tee /etc/borgstore/repo2.env > /dev/null
+        sudo chmod 600 /etc/borgstore/repo1.env /etc/borgstore/repo2.env
+
+        # Install systemd units from contrib
+        sudo cp contrib/server/nginx-systemd/borgstore@.service /etc/systemd/system/
+        sudo cp contrib/server/nginx-systemd/borgstore@.socket  /etc/systemd/system/
+
+        sudo systemctl daemon-reload
+
+        # Enable socket units for both repos — socket activation starts each borgstore on demand
+        sudo systemctl enable --now borgstore@repo1.socket
+        sudo systemctl enable --now borgstore@repo2.socket
+
+        # Install nginx proxy snippet from contrib
+        sudo mkdir -p /etc/nginx/snippets
+        sudo cp contrib/server/nginx-systemd/borgstore-proxy.conf /etc/nginx/snippets/
+
+        # Install nginx config from contrib
+        sudo cp contrib/server/nginx-systemd/nginx-borgstore.conf /etc/nginx/sites-available/borgstore
+        sudo ln -sf /etc/nginx/sites-available/borgstore /etc/nginx/sites-enabled/borgstore
+        sudo rm -f /etc/nginx/sites-enabled/default
+        sudo nginx -t
+        sudo systemctl restart nginx
+
+        # Export REST test URLs for tox via GITHUB_ENV
+        echo "BORGSTORE_TEST_REST1_URL=http://testuser:testpass@localhost/repos/repo1/" >> $GITHUB_ENV
+        echo "BORGSTORE_TEST_REST2_URL=http://testuser:testpass@localhost/repos/repo2/" >> $GITHUB_ENV
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
@@ -155,3 +214,16 @@ jobs:
       run: pip install -ve ".[rest,rclone]"
     - name: run tox envs
       run: tox -e ${{ matrix.toxenv }}
+    - name: Display diagnostics on failure
+      if: failure() && runner.os == 'Linux'
+      run: |
+        echo "--- /run/borgstore/ listing ---"
+        sudo ls -la /run/borgstore/ || true
+        echo "--- nginx access log ---"
+        sudo cat /var/log/nginx/access.log || true
+        echo "--- nginx error log ---"
+        sudo cat /var/log/nginx/error.log || true
+        echo "--- borgstore@repo1 journal ---"
+        sudo journalctl -u borgstore@repo1.service --no-pager -n 100 || true
+        echo "--- borgstore@repo1 status ---"
+        sudo systemctl status borgstore@repo1.service --no-pager || true
