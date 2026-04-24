@@ -37,8 +37,12 @@ from .errors import (
 
 
 def get_rest_backend(base_url: str):
-    # http(s)://username:password@hostname:port/ or http(s)://hostname:port/ + auth from env
-    # note: path component must be "/" (no sub-path allowed, as it would silently prepend to all item names)
+    # http(s)://username:password@hostname:port/sub/path or
+    # http(s)://hostname:port/sub/path + authentication from environment
+    #
+    # note: borgstore.server.rest does not support sub-paths, but sub-paths are
+    # supported in the rest client for use with reverse-proxy setups (see contrib/)
+    # or custom REST servers.
     if not base_url.startswith(("http:", "https:")):
         return None
 
@@ -51,14 +55,14 @@ def get_rest_backend(base_url: str):
         (?P<scheme>http|https)://
         ((?P<username>[^:]+):(?P<password>[^@]+)@)?
         (?P<host>[^:/]+)(:(?P<port>\d+))?
-        (?P<path>/)
+        (?P<path>/[^?#]*)?
     """
     m = re.match(http_regex, base_url, re.VERBOSE)
     if m:
         scheme = m.group("scheme")
         host = m.group("host")
         port = m.group("port")
-        path = m.group("path")
+        path = m.group("path") or ""
 
         base_url = f"{scheme}://{host}{f':{port}' if port else ''}{path}"
 
