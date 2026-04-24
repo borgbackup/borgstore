@@ -148,6 +148,11 @@ class Rclone(BackendBase):
         if not self.process:
             raise BackendMustBeOpen()
         self.process.terminate()
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
         self.process = None
         self.url = None
 

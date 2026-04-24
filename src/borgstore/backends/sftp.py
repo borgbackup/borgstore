@@ -67,6 +67,8 @@ class Sftp(BackendBase):
         self.base_path = path
         self.opened = False
         self.check_file_supported = True
+        self.ssh: Optional[paramiko.SSHClient] = None
+        self.client: Optional[paramiko.SFTPClient] = None
         if paramiko is None:
             raise BackendError("sftp backend unavailable: could not import paramiko!")
 
@@ -100,24 +102,32 @@ class Sftp(BackendBase):
         return host_config
 
     def _connect(self):
-        ssh = paramiko.SSHClient()
-        # Note: we do not deal with unknown hosts and ssh.set_missing_host_key_policy here.
-        # The user should make the first contact to any new host using the ssh or sftp CLI command
-        # and interactively verify remote host fingerprints.
-        ssh.load_system_host_keys()  # This is documented to load the user's known_hosts file
-        host_config = self._get_host_config()
-        ssh.connect(
-            hostname=host_config["hostname"],
-            username=host_config.get("user"),  # if None, paramiko will use current user
-            port=int(host_config["port"]),
-            key_filename=host_config.get("identityfile"),  # list of keys, ~ is already expanded
-            allow_agent=True,
-        )
-        self.client = ssh.open_sftp()
+        try:
+            self.ssh = paramiko.SSHClient()
+            # Note: we do not deal with unknown hosts and ssh.set_missing_host_key_policy here.
+            # The user should make the first contact to any new host using the ssh or sftp CLI command
+            # and interactively verify remote host fingerprints.
+            self.ssh.load_system_host_keys()  # This is documented to load the user's known_hosts file
+            host_config = self._get_host_config()
+            self.ssh.connect(
+                hostname=host_config["hostname"],
+                username=host_config.get("user"),  # if None, paramiko will use current user
+                port=int(host_config["port"]),
+                key_filename=host_config.get("identityfile"),  # list of keys, ~ is already expanded
+                allow_agent=True,
+            )
+            self.client = self.ssh.open_sftp()
+        except Exception:
+            self._disconnect()
+            raise
 
     def _disconnect(self):
-        self.client.close()
-        self.client = None
+        if self.client:
+            self.client.close()
+            self.client = None
+        if self.ssh:
+            self.ssh.close()
+            self.ssh = None
 
     def create(self):
         if self.opened:
