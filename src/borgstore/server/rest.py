@@ -1,3 +1,4 @@
+import secrets
 import hashlib
 import argparse
 import json
@@ -63,7 +64,9 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         try:
             decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
             username, _, password = decoded_credentials.partition(":")
-            authorized = username == self.server.username and password == self.server.password
+            authorized = secrets.compare_digest(username, self.server.username) and secrets.compare_digest(
+                password, self.server.password
+            )
             return authorized
         except Exception:
             logger.exception("Authentication code crashed, returning: unauthorized.")
