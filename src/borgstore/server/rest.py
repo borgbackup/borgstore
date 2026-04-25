@@ -1,3 +1,4 @@
+import secrets
 import hashlib
 import argparse
 import json
@@ -63,7 +64,9 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         try:
             decoded_credentials = base64.b64decode(encoded_credentials).decode("utf-8")
             username, _, password = decoded_credentials.partition(":")
-            authorized = username == self.server.username and password == self.server.password
+            authorized = secrets.compare_digest(username, self.server.username) and secrets.compare_digest(
+                password, self.server.password
+            )
             return authorized
         except Exception:
             logger.exception("Authentication code crashed, returning: unauthorized.")
@@ -110,23 +113,31 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         return self.split_url.path.strip("/")
 
     def _handle_exception(self, e, name=None):
+        msg = str(e)
+        # Security: do not leak absolute paths in error messages
+        for attr in ("base_path", "fs"):
+            if self.server.backend and hasattr(self.server.backend, attr):
+                path_val = str(getattr(self.server.backend, attr))
+                if path_val and path_val in msg:
+                    msg = msg.replace(path_val, "[STORAGE_BASE]")
+
         if isinstance(e, ObjectNotFound):
-            self.send_error(HTTP.NOT_FOUND, str(e))
+            self.send_error(HTTP.NOT_FOUND, msg)
         elif isinstance(e, BackendDoesNotExist):
-            self.send_error(HTTP.GONE, str(e))
+            self.send_error(HTTP.GONE, msg)
         elif isinstance(e, BackendAlreadyExists):
-            self.send_error(HTTP.CONFLICT, str(e))
+            self.send_error(HTTP.CONFLICT, msg)
         elif isinstance(e, (BackendMustBeOpen, BackendMustNotBeOpen)):
-            self.send_error(HTTP.PRECONDITION_FAILED, str(e))
+            self.send_error(HTTP.PRECONDITION_FAILED, msg)
         elif isinstance(e, PermissionDenied):
-            self.send_error(HTTP.FORBIDDEN, str(e))
+            self.send_error(HTTP.FORBIDDEN, msg)
         elif isinstance(e, QuotaExceeded):
-            self.send_error(HTTP.INSUFFICIENT_STORAGE, str(e))
+            self.send_error(HTTP.INSUFFICIENT_STORAGE, msg)
         elif isinstance(e, (ValueError, TypeError)):
-            self.send_error(HTTP.BAD_REQUEST, str(e))
+            self.send_error(HTTP.BAD_REQUEST, msg)
             logger.exception("Exception for %s", name or self.path)
         elif isinstance(e, BackendError):
-            self.send_error(HTTP.INTERNAL_SERVER_ERROR, str(e))
+            self.send_error(HTTP.INTERNAL_SERVER_ERROR, msg)
             logger.exception("Exception for %s", name or self.path)
         else:
             self.send_error(HTTP.INTERNAL_SERVER_ERROR, "Internal Server Error")
@@ -322,6 +333,14 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
 
 class BorgStoreRESTServer(ThreadingHTTPServer):
+    """
+    BorgStore REST Server.
+
+    Security Warning:
+    This server does not implement TLS. In a production environment, it SHOULD
+    be run behind a reverse proxy (like Nginx or Caddy) that provides HTTPS.
+    """
+
     disable_nagle_algorithm = True  # aka TCP_NODELAY, reduces latency
 
     def __init__(self, server_address, backend, username=None, password=None):
