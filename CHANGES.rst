@@ -1,8 +1,8 @@
 Changelog
 =========
 
-Version 0.4.1 (not released yet)
---------------------------------
+Version 0.4.1 (2026-04-26)
+--------------------------
 
 New features:
 
