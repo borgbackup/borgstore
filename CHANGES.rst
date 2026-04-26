@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Version 0.x.x (not released yet)
+Version 0.4.1 (not released yet)
 --------------------------------
 
 New features:
@@ -9,11 +9,34 @@ New features:
 - quota: implement quota tracking and enforcement (posixfs), #19
 - load: implement tail loading support (negative offset)
 - store: hashsum content verification (REST server/client), #148
-- defrag: defragmentation helper (copies blocks from source to target items)
 - hash: item content hashing, e.g. sha256
-- REST server: server-side implementation of defrag and hash
+- defrag: defragmentation helper (copies blocks from source to target items)
 - sftp: try to use "check-file" for SFTP server-side hashing (not supported
   by OpenSSH and also not tested by us; please give feedback if you use it)
+- REST backend (client): support sub-paths, #155, #156
+- REST server:
+
+  - server-side implementation of defrag and hash
+  - --socket-activation - add systemd socket activation support, enabling
+    on-demand per-repo startup without port management.
+  - contrib/server/nginx-systemd/ has a nginx reverse proxy setup
+    example that can support multiple stores at different sub-paths.
+  - support quotas (via posixfs backend)
+
+Fixes:
+
+- rclone: fix process leak in close()
+- REST server:
+
+  - sanitize error messages to avoid leaking absolute storage paths
+  - harden authentication against timing attacks
+  - slightly optimize directory listing memory usage
+- sftp:
+
+  - fix SSH connection leak
+  - host_config["port"] is a str
+  - Store paramiko.SSHClient in self.ssh and ensure it is closed in
+    _disconnect, _connect calls _disconnect on any failure during setup.
 
 
 Version 0.4.0 (2026-03-15)
