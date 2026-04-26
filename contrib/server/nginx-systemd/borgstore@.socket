@@ -1,0 +1,32 @@
+# Template socket unit for borgstore REST server with Unix domain sockets.
+#
+# Using a Unix socket per repo avoids all port management: the socket path
+# encodes the repo name, and nginx proxies to it directly.
+#
+# Socket path: /run/borgstore/%i.sock
+# RuntimeDirectory= below ensures /run/borgstore/ exists before the socket
+# is created (required because the socket unit starts before the service unit).
+#
+# Enable for a repo:
+#   systemctl enable --now borgstore@repo1.socket
+
+[Unit]
+Description=BorgStore REST socket (%i)
+Documentation=https://github.com/borgbackup/borgstore
+
+[Socket]
+ListenStream=/run/borgstore/%i.sock
+SocketUser=borgstore
+# Use the web server's group so nginx (www-data) can connect without extra
+# group membership changes. Adjust if your web server runs as a different user.
+SocketGroup=www-data
+SocketMode=0660
+Accept=false
+# Create /run/borgstore/ before binding the socket.
+# This must be here (not only in the service unit) because the socket
+# unit starts before the service unit activates.
+RuntimeDirectory=borgstore
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=sockets.target

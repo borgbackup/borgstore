@@ -4,6 +4,9 @@ import argparse
 import json
 import base64
 import logging
+import os
+import socket
+import itertools
 from http import HTTPStatus as HTTP
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlsplit, parse_qs
@@ -27,12 +30,25 @@ logger = logging.getLogger(__name__)
 class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    # https://en.wikipedia.org/wiki/List_of_Unicode_characters#Control_codes
+    _control_char_table = str.maketrans({c: rf"\x{c:02x}" for c in itertools.chain(range(0x20), range(0x7F, 0xA0))})
+    _control_char_table[ord("\\")] = r"\\"
+
+    def address_string(self):
+        # Override to handle Unix domain sockets (AF_UNIX).
+        # BaseHTTPRequestHandler.address_string() assumes client_address is a tuple (host, port).
+        # For AF_UNIX, client_address is a string (the path), which can be empty.
+        if isinstance(self.client_address, str):
+            return self.client_address or "unix"
+        return super().address_string()
+
     def _log(self, format, args, level=logging.INFO):
         addr = self.address_string()
         dt = self.log_date_time_string()
         user = self.server.username or "-"
         request_details = format % args
-        logger.log(level, "%s %s %s [%s] %s" % (addr, "-", user, dt, request_details))
+        msg = f"{addr} - {user} [{dt}] {request_details}"
+        logger.log(level, msg.translate(self._control_char_table))
 
     def log_message(self, format, *args):
         self._log(format, args, logging.INFO)
@@ -76,6 +92,8 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         if content_type:
             self.send_header("Content-Type", content_type)
+        # Ensure no proxy or client caches our REST responses.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         if headers:
             for key, value in headers.items():
                 self.send_header(key, value)
@@ -332,6 +350,26 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             self._handle_exception(e, self.name)
 
 
+def get_pre_bound_socket():
+    """Return pre-bound socket passed by systemd via socket activation.
+
+    Reads LISTEN_FDS from the environment (set by systemd) and wraps each
+    raw file descriptor (starting at fd 3) as a socket.socket object.
+
+    See sd_listen_fds(3) for the protocol.
+    """
+    n = int(os.environ.get("LISTEN_FDS", 0))
+    if n == 0:
+        raise RuntimeError(
+            "--socket-activation was requested but no sockets were passed by systemd (LISTEN_FDS not set or 0)"
+        )
+    if n > 1:
+        raise RuntimeError(f"--socket-activation expects exactly 1 socket from systemd, got {n}")
+    # SD_LISTEN_FDS_START is always 3. The socket is a Unix domain socket
+    # (as configured in borgstore@.socket), so use AF_UNIX / SOCK_STREAM.
+    return socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
+
+
 class BorgStoreRESTServer(ThreadingHTTPServer):
     """
     BorgStore REST Server.
@@ -343,11 +381,40 @@ class BorgStoreRESTServer(ThreadingHTTPServer):
 
     disable_nagle_algorithm = True  # aka TCP_NODELAY, reduces latency
 
-    def __init__(self, server_address, backend, username=None, password=None):
+    def __init__(self, server_address, backend, username=None, password=None, adopted_socket=None):
         self.backend = backend
         self.username = username
         self.password = password
-        super().__init__(server_address, BorgStoreRESTRequestHandler)
+        if adopted_socket is not None:
+            # Socket activation: systemd already bound and is listening on adopted_socket.
+            #
+            # TCPServer.__init__ unconditionally creates self.socket = socket.socket(...)
+            # regardless of bind_and_activate, so we cannot set self.socket before calling
+            # super().__init__. The correct sequence is:
+            #   1. Call super().__init__ with bind_and_activate=False so it sets up
+            #      internal state (but also creates a fresh, unbound socket).
+            #   2. Close and discard that fresh socket.
+            #   3. Replace self.socket with the systemd-provided one.
+            #   4. Read back server_address from the socket (getsockname()).
+            #   Do NOT call server_bind() or server_activate() — the socket is already
+            #   bound and listening; calling bind() again raises EADDRINUSE.
+            self.address_family = socket.AF_UNIX
+            # Unix sockets do not support TCP_NODELAY.
+            self.disable_nagle_algorithm = False
+            super().__init__(server_address, BorgStoreRESTRequestHandler, bind_and_activate=False)
+            self.socket.close()  # discard the socket super() created
+            self.socket = adopted_socket  # install the systemd socket
+            self.server_address = self.socket.getsockname()
+            # HTTPServer.server_bind usually sets these. We set them manually for AF_UNIX.
+            self.server_name = "unix-socket"
+            self.server_port = 0
+        else:
+            super().__init__(server_address, BorgStoreRESTRequestHandler)
+
+    def handle_error(self, request, client_address):
+        # Ensure all errors are logged to the journal so we can see them in CI.
+        logger.exception(f"Exception occurred during processing of request from {client_address}")
+        super().handle_error(request, client_address)
 
 
 PERMISSION_SHORTCUTS = {
@@ -389,12 +456,19 @@ def resolve_permissions(permissions):
         raise ValueError(f"Invalid --permissions value: {permissions!r}. Use a shortcut ({valid}) or a JSON object.")
 
 
-def serve(host, port, backend_url, username=None, password=None, permissions=None, quota=None):
+def serve(host, port, backend_url, username=None, password=None, permissions=None, quota=None, socket_activation=False):
     backend = get_backend(backend_url, permissions=permissions, quota=quota)
     if backend is None:
         raise ValueError(f"Invalid backend URL: {backend_url}")
-    server = BorgStoreRESTServer((host, port), backend, username, password)
-    logger.info(f"BorgStore REST server listening on {host}:{port}")
+    if socket_activation:
+        adopted = get_pre_bound_socket()
+        adopted.setblocking(True)
+        server_address = adopted.getsockname()
+        server = BorgStoreRESTServer(server_address, backend, username, password, adopted_socket=adopted)
+        logger.info(f"BorgStore REST server using systemd-activated socket on {server_address}")
+    else:
+        server = BorgStoreRESTServer((host, port), backend, username, password)
+        logger.info(f"BorgStore REST server listening on {host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -407,13 +481,27 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger.setLevel(logging.INFO)
     parser = argparse.ArgumentParser(description="BorgStore REST Server")
-    parser.add_argument("--host", default="127.0.0.1", help="Address/hostname to listen on")
-    parser.add_argument("--port", type=int, default=5618, help="Port to listen on (default: 5618)")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Address/hostname to listen on (ignored with --socket-activation)"
+    )
+    parser.add_argument("--port", type=int, default=5618, help="Port to listen on (ignored with --socket-activation)")
     parser.add_argument("--backend", required=True, help="Backend URL (e.g. file:///tmp/store)")
     parser.add_argument("--username", help="Basic Auth username")
     parser.add_argument("--password", help="Basic Auth password")
     parser.add_argument("--permissions", help="Permissions: a shortcut name or a JSON object string.")
     parser.add_argument("--quota", type=int, default=None, help="Quota in bytes.")
+    parser.add_argument(
+        "--socket-activation", action="store_true", help="Adopt pre-bound socket from systemd (SD_LISTEN_FDS)"
+    )
     args = parser.parse_args()
     permissions = resolve_permissions(args.permissions)
-    serve(args.host, args.port, args.backend, args.username, args.password, permissions, args.quota)
+    serve(
+        args.host,
+        args.port,
+        args.backend,
+        args.username,
+        args.password,
+        permissions,
+        args.quota,
+        args.socket_activation,
+    )

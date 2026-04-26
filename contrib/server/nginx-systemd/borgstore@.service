@@ -1,0 +1,59 @@
+# Template service unit for borgstore REST server with socket activation.
+#
+# The instance name (%i) is the repo identifier, which must match a
+# borgstore@%i.socket unit and an environment file in /etc/borgstore/.
+#
+# Deploy:
+#   cp borgstore@.service borgstore@.socket /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now borgstore@repo1.socket
+#
+# Connect (borg client, via nginx reverse proxy — see nginx-borgstore.conf):
+#   borg -r http://backup.example.com/repos/borg/repo1/ repo-create ...
+
+[Unit]
+Description=BorgStore REST server (%i)
+Documentation=https://github.com/borgbackup/borgstore
+# Start after the socket unit activates us; also restart if socket is restarted
+Requires=borgstore@%i.socket
+After=borgstore@%i.socket
+
+[Service]
+Type=simple
+User=borgstore
+Group=borgstore
+
+# Credentials loaded from per-instance env file.
+# Minimum required: BORGSTORE_BACKEND, BORGSTORE_USERNAME, BORGSTORE_PASSWORD
+EnvironmentFile=/etc/borgstore/%i.env
+
+ExecStart=/usr/bin/python3 -m borgstore.server.rest \
+    --backend ${BORGSTORE_BACKEND} \
+    --username ${BORGSTORE_USERNAME} \
+    --password ${BORGSTORE_PASSWORD} \
+    --socket-activation
+
+# Kill the process after 30 s of idle (no open connections).
+# Systemd will restart it on the next connection via the socket unit.
+# Remove these two lines if you prefer the process to stay resident.
+TimeoutStopSec=30
+KillMode=control-group
+
+Restart=on-failure
+RestartSec=5
+
+# Harden the service
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/borgstore
+PrivateTmp=true
+# Keep /run/borgstore/ alive for the lifetime of the service.
+# The socket unit also declares RuntimeDirectory=borgstore, which creates
+# the directory (with correct ownership) before the socket is bound.
+RuntimeDirectory=borgstore
+RuntimeDirectoryMode=0755
+
+[Install]
+# Not enabled directly; the .socket unit triggers this.
+WantedBy=multi-user.target
