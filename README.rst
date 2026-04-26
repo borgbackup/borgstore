@@ -274,6 +274,9 @@ Run a server with a file: backend (for a local directory), using HTTP Basic Auth
             --username user --password pass \
             --backend file:///tmp/teststore
 
+For production deployments, consider using systemd socket activation
+(see contrib/server/nginx-systemd/README.md).
+
 Accessing the server from a client
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
