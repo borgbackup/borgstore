@@ -339,9 +339,9 @@ Example — restrict a backup server to no-delete access:
 
 .. code-block:: bash
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \\
-            --username user --password pass \\
-            --backend file:///home/user/repos/repo1 \\
+    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
+            --username user --password pass \
+            --backend file:///home/user/repos/repo1 \
             --permissions borgbackup-no-delete
 
 Custom JSON permissions
@@ -359,7 +359,7 @@ Hierarchical rules (list-only at root, read/write in ``data/``)::
 Quota
 ~~~~~
 
-The REST server, when used with the ``file:`` backend,  optionally supports
+The REST server, when used with the ``file:`` backend, optionally supports
 quota tracking and enforcement.
 
 Use the ``--quota`` argument to set a maximum storage size in bytes (default is
@@ -372,9 +372,9 @@ Example — limit storage to 1 GiB:
 
 .. code-block:: bash
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \\
-            --username user --password pass \\
-            --backend file:///tmp/teststore \\
+    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
+            --username user --password pass \
+            --backend file:///tmp/teststore \
             --quota 1073741824
 
 
