@@ -31,7 +31,8 @@ from .errors import (
 RCLONE = os.environ.get("RCLONE_BINARY", "rclone")
 
 # Debug HTTP requests and responses
-if False:
+RCLONE_DEBUG = os.environ.get("BORGSTORE_RCLONE_DEBUG", "0")
+if RCLONE_DEBUG.strip().lower() in ("1", "true", "yes", "y", "on"):
     import logging
     import http.client as http_client
 
