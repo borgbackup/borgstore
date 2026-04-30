@@ -7,3 +7,4 @@ dist
 __pycache__
 src/borgstore.egg-info
 src/borgstore/_version.py
+docs/_build
