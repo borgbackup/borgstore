@@ -1,429 +1,60 @@
 BorgStore
 =========
 
-A key/value store implementation in Python, supporting multiple backends.
+borgstore implements a general purpose key/value store in Python.
 
-Keys
-----
-
-A key (str) can look like:
-
-- 0123456789abcdef... (usually a long, hex-encoded hash value)
-- Any other pure ASCII string without '/', '..', or spaces.
-
-
-Namespaces
-----------
-
-To keep things separate, keys should be prefixed with a namespace, such as:
-
-- config/settings
-- meta/0123456789abcdef...
-- data/0123456789abcdef...
-
-Please note:
-
-1. You should always use namespaces.
-2. Nested namespaces like namespace1/namespace2/key are not supported.
-3. The code can work without a namespace (empty namespace ""), but then you
-   can't add another namespace later, because that would create
-   nested namespaces.
-
-Values
-------
-
-Values can be any arbitrary binary data (bytes).
-
-Store Operations
-----------------
-
-The high-level Store API implementation transparently deals with nesting and
-soft deletion, so the caller doesn't need to care much about that, and the backend
-API can be much simpler:
-
-- create/destroy: initialize or remove the whole store.
-- list: flat list of the items in the given namespace (by default, only non-deleted
-  items; optionally, only soft-deleted items).
-- store: write a new item into the store (providing its key/value pair).
-- load: read a value from the store (given its key); partial loads specifying
-  an offset and/or size are supported.
-- info: get information about an item via its key (exists, size, ...).
-- hash: computes the hexdigest for the content of an item (given its key).
-- delete: immediately remove an item from the store (given its key).
-- move: implements renaming, soft delete/undelete, and moving to the current
-  nesting level.
-- defrag: general purpose defragmentation helper (copies blocks to new items)
-- quota: return quota limit and usage (-1 if quotas not enabled or not supported)
-- stats: API call counters, time spent in API methods, data volume/throughput.
-- latency/bandwidth emulator: can emulate higher latency (via BORGSTORE_LATENCY
-  [us]) and lower bandwidth (via BORGSTORE_BANDWIDTH [bit/s]) than what is
-  actually provided by the backend.
-
-Store operations (and per-op timing and volume) are logged at DEBUG log level.
-
-Automatic Nesting
------------------
-
-For the Store user, items have names such as:
-
-- namespace/0123456789abcdef...
-- namespace/abcdef0123456789...
-
-If there are very many items in the namespace, this could lead to scalability
-issues in the backend. The Store implementation therefore offers transparent
-nesting, so that internally the backend API is called with names such as:
-
-- namespace/01/23/56/0123456789abcdef...
-- namespace/ab/cd/ef/abcdef0123456789...
-
-The nesting depth can be configured from 0 (= no nesting) to N levels and
-there can be different nesting configurations depending on the namespace.
-
-The Store supports operating at different nesting levels in the same
-namespace at the same time.
-
-When using nesting depth > 0, the backends assume that keys are hashes
-(contain hex digits) because some backends pre-create the nesting
-directories at initialization time to optimize backend performance.
-
-Soft deletion
--------------
-
-To soft-delete an item (so its value can still be read or it can be
-undeleted), the store just renames the item, appending ".del" to its name.
-
-Undelete reverses this by removing the ".del" suffix from the name.
-
-Some store operations provide a boolean flag "deleted" to control whether they
-consider soft-deleted items.
-
-Backends
+Overview
 --------
 
-The backend API is rather simple; one only needs to provide some very
-basic operations.
-
-Existing backends are listed below; more might come in the future.
-
-posixfs
-~~~~~~~
-
-Use storage on a local POSIX filesystem:
-
-- URL: ``file:///absolute/path``
-- It is the caller's responsibility to convert a relative path into an absolute
-  filesystem path.
-- Namespaces: directories
-- Values: in key-named files
-- Quota: tracks backend storage size and rejects ``store`` if quota is exceeded.
-
-  The current usage is persisted to a hidden file in the storage directory.
-
-  When quota tracking is enabled on a backend that already contains data,
-  the server automatically scans the directories at ``open`` time (that may
-  take a while if there are many files). That scan can be avoided by always
-  using quotas.
-- Permissions: This backend can enforce a simple, test-friendly permission system
-  and raises ``PermissionDenied`` if access is not permitted by the configuration.
-
-  You provide a mapping of names (paths) to granted permission letters. Permissions
-  apply to the exact name and all of its descendants (inheritance). If a name is not
-  present in the mapping, its nearest ancestor is consulted, up to the empty name
-  "" (the store root). If no mapping is provided at all, all operations are allowed.
-
-  Permission letters:
-
-  - ``l``: allow listing object names (directory/namespace listing)
-  - ``r``: allow reading objects (contents)
-  - ``w``: allow writing new objects (must not already exist)
-  - ``W``: allow writing objects including overwriting existing objects
-  - ``D``: allow deleting objects
-
-  Operation requirements:
-
-  - create(): requires ``w`` or ``W`` on the store root (``wW``)
-  - destroy(): requires ``D`` on the store root
-  - mkdir(name): requires ``w``
-  - rmdir(name): requires ``w`` or ``D`` (``wD``)
-  - list(name): requires ``l``
-  - info(name): requires ``l`` (``r`` also accepted)
-  - load(name): requires ``r``
-  - store(name, value): requires ``w`` for new objects, ``W`` for overwrites (``wW``)
-  - delete(name): requires ``D``
-  - move(src, dst): requires ``D`` for the source and ``w``/``W`` for the destination
-
-  Examples:
-
-  - Read-only store (recursively): ``permissions = {"": "lr"}``
-  - No-delete, no-overwrite (but allow adding new items): ``permissions = {"": "lrw"}``
-  - Hierarchical rules: only allow listing at root, allow read/write in "dir",
-    but only read for "dir/file":
-
-    ::
-
-        permissions = {
-            "": "l",
-            "dir": "lrw",
-            "dir/file": "r",
-        }
-
-  To use permissions with ``Store`` and ``posixfs``, pass the mapping to Store and it
-  will be handed to the posixfs backend:
-
-  ::
-
-      from borgstore import Store
-      store = Store(url="file:///abs/path", permissions={"": "lrwWD"})
-      store.create()
-      store.open()
-      # ...
-      store.close()
-
-sftp
-~~~~
-
-Use storage on an SFTP server:
-
-- URL: ``sftp://user@server:port/relative/path`` (strongly recommended)
-
-  For users' and admins' convenience, the mapping of the URL path to the server filesystem path
-  depends on the server configuration (home directory, sshd/sftpd config, ...).
-  Usually the path is relative to the user's home directory.
-- URL: ``sftp://user@server:port//absolute/path``
-
-  As this uses an absolute path, some things become more difficult:
-
-  - A user's configuration might break if a server admin moves a user's home to a new location.
-  - Users must know the full absolute path of the space they are permitted to use.
-- Namespaces: directories
-- Values: in key-named files
-- hash: runs the hexdigest computation server-side (if server supports check-file).
-
-rclone
-~~~~~~
-
-Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ supports:
-
-- URL: ``rclone:remote:path`` — we just prefix "rclone:" and pass everything to the right
-  of that to rclone; see: https://rclone.org/docs/#syntax-of-remote-paths
-- The implementation primarily depends on the specific remote.
-- The rclone binary path can be set via the environment variable ``RCLONE_BINARY`` (default: "rclone").
-
-
-s3
-~~
-
-Use storage on an S3-compliant cloud service:
-
-- URL: ``(s3|b2):[profile|(access_key_id:access_key_secret)@][scheme://hostname[:port]]/bucket/path``
-
-  The underlying backend is based on ``boto3``, so all standard boto3 authentication methods are supported:
-
-  - provide a named profile (from your boto3 config),
-  - include access key ID and secret in the URL,
-  - or use default credentials (e.g., environment variables, IAM roles, etc.).
-
-  See the `boto3 credentials documentation <https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html>`_ for more details.
-
-  If you're connecting to **AWS S3**, the ``[schema://hostname[:port]]`` part is optional.
-  Bucket and path are always required.
-
-  .. note::
-
-     There is a known issue with some S3-compatible services (e.g., **Backblaze B2**).
-     If you encounter problems, try using ``b2:`` instead of ``s3:`` in the URL.
-
-- Namespaces: directories
-- Values: in key-named files
-
-
-REST (http/https)
-~~~~~~~~~~~~~~~~~
-
-Use storage on a BorgStore REST server:
-
-- URL: ``http[s]://[user:password@]host:port/``
-- Namespaces: depends on backend used by the server
-- Values: depends on backend used by the server
-- Authentication: Optional Basic Auth is supported.
-- hash: runs the hexdigest computation server-side.
-- defrag: runs the defragmentation helper server-side.
-
-
-REST Server
------------
-
-BorgStore includes a simple REST server that can be used to provide remote access
-to any BorgStore backend.
-
-It can do some stuff server-side, which is usually not possible when using other
-cloud storage servers:
-
-- enforcing permissions
-- server rejects store operation if content hashsum does not match expected
-  hashsum (from http header X-Content-hash-sha256)
-- server-side hash computation (e.g. sha256) for item content
-- server-side defragmentation helper (copies blocks to new items)
-
-Running the server
-~~~~~~~~~~~~~~~~~~
-
-Run a server with a file: backend (for a local directory), using HTTP Basic Authentication::
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore
-
-For production deployments, consider using systemd socket activation
-(see contrib/server/nginx-systemd/README.md).
-
-Accessing the server from a client
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The borgstore REST client can then access via::
-
-    http://user:pass@127.0.0.1:5618/
-
-Permissions
-~~~~~~~~~~~
-
-The REST server, when used with the ``posixfs`` backend, supports the same permissions
-system as that backend (see above).
-
-If ``--permissions`` is omitted, all operations are allowed.
-To restrict permissions, pass a JSON-encoded permissions mapping via ``--permissions``.
-
-Examples:
-
-Read-only access::
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lr"}'
-
-No-delete, no-overwrite (allow adding new items)::
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lrw"}'
-
-Full access::
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lrwWD"}'
-
-BorgBackup shortcuts
-^^^^^^^^^^^^^^^^^^^^
-
-Instead of hand-crafting a JSON mapping, you can use a named shortcut tailored for
-`BorgBackup <https://www.borgbackup.org/>`_ repositories:
-
-``borgbackup-all``
-    No permission restrictions — all operations are allowed (equivalent to omitting ``--permissions``).
-
-``borgbackup-no-delete``
-    Prevent deletion and overwriting of existing objects; new objects may still be added.
-
-``borgbackup-write-only``
-    Clients may store new data but cannot read existing data back (except for caches and metadata
-    that borg needs internally).
-
-``borgbackup-read-only``
-    Clients may only list and read objects.
-
-Example — restrict a backup server to no-delete access:
-
-.. code-block:: bash
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///home/user/repos/repo1 \
-            --permissions borgbackup-no-delete
-
-Custom JSON permissions
-^^^^^^^^^^^^^^^^^^^^^^^
-
-You can also pass an arbitrary JSON-encoded permissions mapping directly.
-
-Hierarchical rules (list-only at root, read/write in ``data/``)::
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "l", "data": "lrw"}'
-
-Quota
-~~~~~
-
-The REST server, when used with the ``file:`` backend, optionally supports
-quota tracking and enforcement.
-
-Use the ``--quota`` argument to set a maximum storage size in bytes (default is
-no quota tracking and enforcement).
-
-When the quota is exceeded, ``store`` operations are rejected with HTTP 507
-(Insufficient Storage).
-
-Example — limit storage to 1 GiB:
-
-.. code-block:: bash
-
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --quota 1073741824
-
-
-Scalability
------------
-
-- Count of key/value pairs stored in a namespace: automatic nesting is
-  provided for keys to address common scalability issues.
-- Key size: there are no special provisions for extremely long keys (e.g.,
-  exceeding backend limitations). Usually this is not a problem, though.
-- Value size: there are no special provisions for dealing with large value
-  sizes (e.g., more than available memory, more than backend storage limitations,
-  etc.). If one deals with very large values, one usually cuts them into
-  chunks before storing them in the store.
-- Partial loads improve performance by avoiding a full load if only part
-  of the value is needed (e.g., a header with metadata).
-
-Installation
-------------
-
-Install without the extras:
-
-    pip install borgstore
-    pip install "borgstore[none]"  # same thing (simplifies automation)
-
-Install with the ``rest:`` backend (more dependencies)::
-
-    pip install "borgstore[rest]"
-
-Install with the ``sftp:`` backend (more dependencies)::
-
-    pip install "borgstore[sftp]"
-
-Install with the ``s3:`` backend (more dependencies)::
-
-    pip install "borgstore[s3]"
-
-Install with the ``rclone:`` backend (more dependencies)::
-
-    pip install "borgstore[rclone]"
-
-Please note that ``rclone:`` also supports SFTP and S3 remotes.
-
-Want a demo?
-------------
-
-Run this to get instructions on how to run the demo::
-
-    python3 -m borgstore
+Keys are simple strings like `config/main` or `data/0123456789abcdef` `[str]`
+(config and data are namespaces here). Values are binary objects `[bytes]`.
+
+The `Store` class is the high-level API, so you can comfortably work with the
+kv store without caring for low-level details.
+
+The `backends` package has misc. storage backend implementations.
+
+The `server` package has a REST server implementation, complementing the REST
+client functionality in the `rest` backend. To actually store stuff, the REST server
+can use any backend internally, e.g. the `posixfs` backend.
+
+Store features
+--------------
+
+- supports URLs, like `file:///srv/borgstore` or `https://myserver/path`
+- easy to use, high-level `Store` API: create/destroy, open/close, list,
+  load/store, delete, move, soft delete/undelete, hash, defrag, ...
+- name nesting / unnesting, recursive directory listing
+- statistics collection
+- latency/bandwidth emulator
+
+Backend features
+----------------
+
+- existing backends for local filesystem, sftp, REST, S3 / B2 (native) and
+  many other cloud storage protocols via rclone
+- new backends are simple to implement
+- key validation
+- partial loads / range requests
+- stored object hashing
+- stored object defragmentation
+- quota support (only `posixfs`)
+- permissions checking (only `posixfs`)
+
+REST server features
+--------------------
+
+- server-side permissions/quota enforcement
+- server-side hashsum check of transferred objects before storing
+- network traffic optimization by doing stuff server-side:
+
+  - stored object hashing
+  - stored object defragmentation
+- the REST server can internally use any backend for storage, e.g. `posixfs`
+- for the REST server, we provide CI tested configs for:
+
+  - an nginx-based reverse proxy
+  - systemd-based on-demand `borgstore.server` process creation
 
 State of this project
 ---------------------
@@ -444,9 +75,3 @@ Borg?
 
 Please note that this code is currently **not** used by the stable release of
 BorgBackup (also known as "borg"), but only by Borg 2 beta 10+ and the master branch.
-
-License
--------
-
-BSD license.
-
