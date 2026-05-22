@@ -7,6 +7,7 @@
 
    installation
    store
+   store_caching
    backends
    servers
    changes

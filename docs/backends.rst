@@ -6,6 +6,8 @@ basic operations.
 
 Existing backends are listed below; more might come in the future.
 
+See also :doc:`store_caching` for optional Store-level caching with a secondary backend.
+
 posixfs
 -------
 

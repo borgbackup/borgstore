@@ -28,6 +28,8 @@ API can be much simpler:
 
 Store operations (and per-op timing and volume) are logged at DEBUG log level.
 
+See also :doc:`store_caching` for optional Store-level caching with a secondary backend.
+
 Keys
 ----
 
