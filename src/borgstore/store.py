@@ -16,7 +16,7 @@ import enum
 import logging
 import os
 import time
-from typing import Iterator, Optional
+from typing import Iterator, NamedTuple, Optional
 
 from .utils.nesting import nest, unnest
 from .backends._base import ItemInfo, BackendBase
@@ -46,6 +46,11 @@ class CacheMode(enum.Enum):
             except ValueError as err:
                 raise ValueError(f"unknown CacheMode: {value!r}") from err
         raise ValueError(f"unknown CacheMode: {value!r}")
+
+
+class CachePolicy(NamedTuple):
+    mode: CacheMode
+    max_age: Optional[float]
 
 
 def get_backend(url, permissions=None, quota=None):
@@ -85,7 +90,7 @@ class Store:
         levels: Optional[dict] = None,
         permissions: Optional[dict] = None,
         *,
-        cache: Optional[dict[str, CacheMode | str]] = None,
+        cache: Optional[dict[str, CachePolicy | dict]] = None,
         cache_url: Optional[str] = None,
         cache_backend: Optional[BackendBase] = None,
     ):
@@ -101,13 +106,15 @@ class Store:
         if cache_url is not None and cache_backend is not None:
             raise ValueError("Only one of cache_url and cache_backend can be given.")
         cache = cache or {}
-        normalized_cache = {namespace: CacheMode.from_str(mode) for namespace, mode in cache.items()}
-        has_enabled_namespaces = any(mode != CacheMode.C_OFF for mode in normalized_cache.values())
+        if not isinstance(cache, dict):
+            raise ValueError("Invalid cache configuration: expected a dict mapping namespace to policy.")
+        cache_policies = {namespace: self._normalize_cache_policy(policy) for namespace, policy in cache.items()}
         configured_namespaces = {namespace for namespace, _ in self.levels}
-        for namespace, mode in normalized_cache.items():
-            if mode != CacheMode.C_OFF and namespace not in configured_namespaces:
+        for namespace, policy in cache_policies.items():
+            if policy.mode != CacheMode.C_OFF and namespace not in configured_namespaces:
                 raise ValueError(f"Invalid cache namespace configuration: {namespace!r} not in levels.")
-        if has_enabled_namespaces and cache_url is None and cache_backend is None:
+        have_cache_enabled_namespaces = any(policy.mode != CacheMode.C_OFF for policy in cache_policies.values())
+        if have_cache_enabled_namespaces and cache_url is None and cache_backend is None:
             raise ValueError("cache_url or cache_backend is required for cache modes other than C_OFF.")
         self.cache_backend = cache_backend if cache_backend is not None else None
         if self.cache_backend is None and cache_url is not None:
@@ -115,11 +122,10 @@ class Store:
             if self.cache_backend is None:
                 raise BackendURLInvalid(f"Invalid or unsupported Cache Backend URL: {cache_url}")
         self._cache_disabled = False
-        self.cache = normalized_cache
         self.cache_namespaces = [
             entry
             for entry in sorted(
-                ((namespace, mode) for namespace, mode in normalized_cache.items() if mode != CacheMode.C_OFF),
+                ((namespace, policy) for namespace, policy in cache_policies.items() if policy.mode != CacheMode.C_OFF),
                 key=lambda item: len(item[0]),
                 reverse=True,
             )
@@ -139,11 +145,47 @@ class Store:
             )
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
 
-    def _cache_mode_for(self, name: str) -> CacheMode:
-        for namespace, mode in self.cache_namespaces:
+    @staticmethod
+    def _normalize_cache_policy(policy: CachePolicy | dict) -> CachePolicy:
+        if isinstance(policy, CachePolicy):
+            return policy
+        if isinstance(policy, dict):
+            unknown_keys = set(policy) - {"mode", "max_age"}
+            if unknown_keys:
+                raise ValueError(f"Invalid cache policy keys: {sorted(unknown_keys)!r}")
+            if "mode" not in policy:
+                raise ValueError("Invalid cache policy: 'mode' is required.")
+            mode = CacheMode.from_str(policy["mode"])
+            max_age = policy.get("max_age")
+            if max_age is None:
+                return CachePolicy(mode=mode, max_age=None)
+            if not isinstance(max_age, (int, float)) or max_age < 0:
+                raise ValueError(f"Invalid cache max_age value: {max_age!r}")
+            return CachePolicy(mode=mode, max_age=float(max_age))
+        raise ValueError("Invalid cache policy: expected dict or CachePolicy.")
+
+    def _cache_policy_for(self, name: str) -> CachePolicy:
+        for namespace, policy in self.cache_namespaces:
             if name.startswith(namespace):
-                return mode
-        return CacheMode.C_OFF
+                return policy
+        return CachePolicy(mode=CacheMode.C_OFF, max_age=None)
+
+    def _cache_is_expired(self, nested_name: str, max_age: Optional[float]) -> bool:
+        if max_age is None:
+            return False
+        if self.cache_backend is None or self._cache_disabled:
+            return True
+        try:
+            info = self.cache_backend.info(nested_name)
+        except ObjectNotFound:
+            return True
+        except Exception as err:
+            logger.warning(f"borgstore: cache info failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
+            return True
+        if not info.atime:
+            return True
+        return (time.time() - info.atime) > max_age
 
     def set_levels(self, levels: dict, create: bool = False) -> None:
         if not levels or not isinstance(levels, dict):
@@ -164,7 +206,7 @@ class Store:
                 cache_enabled = (
                     self.cache_backend is not None
                     and not self._cache_disabled
-                    and self._cache_mode_for(f"{namespace}/") in {CacheMode.C_CACHE, CacheMode.C_MIRROR}
+                    and self._cache_policy_for(f"{namespace}/").mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}
                 )
                 if level == 0:
                     # flat, we just need to create the namespace directory:
@@ -214,9 +256,36 @@ class Store:
                 logger.warning(f"borgstore: cache open failed, disabling cache: {err!r}")
                 self._cache_disabled = True
 
+    def _cache_list(self, name: str) -> Iterator[ItemInfo]:
+        if self.cache_backend is None:
+            return
+        for info in self.cache_backend.list(name):
+            if info.directory:
+                subdir_name = (name + "/" + info.name) if name else info.name
+                yield from self._cache_list(subdir_name)
+            else:
+                full_name = (name + "/" + info.name) if name else info.name
+                yield info._replace(name=full_name)
+
+    def _cache_cleanup_expired(self) -> None:
+        now = time.time()
+        for namespace, policy in self.cache_namespaces:
+            if policy.max_age is None:
+                continue
+            try:
+                for info in self._cache_list(namespace.rstrip("/")):
+                    if info.directory:
+                        continue
+                    if not info.atime or (now - info.atime) > policy.max_age:
+                        self._cache_invalidate(info.name)
+            except Exception as err:
+                logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
+                self._stats["cache_errors"] += 1
+
     def close(self) -> None:
         self.backend.close()
         if self.cache_backend is not None:
+            self._cache_cleanup_expired()
             try:
                 self.cache_backend.close()
             except Exception as err:
@@ -285,8 +354,12 @@ class Store:
         st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
         return st
 
-    def _cache_get(self, nested_name: str) -> Optional[bytes]:
+    def _cache_get(self, nested_name: str, *, max_age: Optional[float] = None) -> Optional[bytes]:
         if self.cache_backend is None or self._cache_disabled:
+            return None
+        if self._cache_is_expired(nested_name, max_age):
+            self._cache_invalidate(nested_name)
+            self._stats["cache_misses"] += 1
             return None
         try:
             value = self.cache_backend.load(nested_name)
@@ -367,14 +440,14 @@ class Store:
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
-            mode = self._cache_mode_for(name)
+            cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
-            if mode == CacheMode.C_CACHE:
-                full_value = self._cache_get(nested_name)
+            if cache_policy.mode == CacheMode.C_CACHE:
+                full_value = self._cache_get(nested_name, max_age=cache_policy.max_age)
                 if full_value is None:
                     full_value = self.backend.load(nested_name, size=None, offset=0)
                     self._cache_put(nested_name, full_value)
-            elif mode == CacheMode.C_MIRROR:
+            elif cache_policy.mode == CacheMode.C_MIRROR:
                 full_value = self.backend.load(nested_name, size=None, offset=0)
                 self._cache_put(nested_name, full_value)
             else:
@@ -392,7 +465,7 @@ class Store:
         with self._stats_updater("store", f"store({name!r})"):
             nested_name = self.find(name)
             self.backend.store(nested_name, value)
-            if self._cache_mode_for(name) in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
                 self._cache_put(nested_name, value)
             self._stats_update_volume("store", len(value))
 
@@ -409,7 +482,7 @@ class Store:
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
             nested_name = self.find(name, deleted=deleted)
             self.backend.delete(nested_name)
-            if self._cache_mode_for(name) in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
                 self._cache_invalidate(nested_name)
 
     def move(
@@ -447,7 +520,7 @@ class Store:
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
             self.backend.move(nested_name, nested_new_name)
-            if self._cache_mode_for(name) in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
                 self._cache_move(nested_name, nested_new_name)
 
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:

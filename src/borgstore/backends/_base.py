@@ -11,7 +11,8 @@ from typing import Iterator
 
 from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX, HID_SUFFIX
 
-ItemInfo = namedtuple("ItemInfo", "name exists size directory")
+# atime is the last read access UNIX timestamp [s] or 0 if not implemented
+ItemInfo = namedtuple("ItemInfo", "name exists size directory atime", defaults=(0,))
 
 
 def validate_name(name):

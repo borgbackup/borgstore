@@ -501,8 +501,14 @@ def test_list(tested_backends, request):
         backend.mkdir("dir")
         items = list(backend.list(ROOTNS))
         assert len(items) == 3
-        assert ItemInfo(name=k0, exists=True, size=len(v0), directory=False) in items
-        assert ItemInfo(name=k1, exists=True, size=len(v1), directory=False) in items
+        matching_k0 = [item for item in items if item.name == k0]
+        matching_k1 = [item for item in items if item.name == k1]
+        assert len(matching_k0) == 1
+        assert len(matching_k1) == 1
+        assert matching_k0[0].exists and not matching_k0[0].directory and matching_k0[0].size == len(v0)
+        assert matching_k1[0].exists and not matching_k1[0].directory and matching_k1[0].size == len(v1)
+        assert matching_k0[0].atime >= 0
+        assert matching_k1[0].atime >= 0
         # for "dir", we do not know what size the backend has returned.
         # that is rather OS / fs / backend specific.
         matching_items = [item for item in items if item.name == "dir"]
@@ -510,6 +516,7 @@ def test_list(tested_backends, request):
         dir_item = matching_items[0]
         assert dir_item.exists
         assert dir_item.directory
+        assert dir_item.atime >= 0
 
         items = list(backend.list("dir"))
         assert items == []

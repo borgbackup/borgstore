@@ -4,7 +4,7 @@ import pytest
 
 from borgstore.backends.errors import ObjectNotFound
 from borgstore.constants import DEL_SUFFIX
-from borgstore.store import CacheMode, Store
+from borgstore.store import CacheMode, CachePolicy, Store
 
 LEVELS = {"data/": [2], "meta/": [1], "config/": [0]}
 
@@ -34,25 +34,97 @@ def test_cache_disabled_by_default(tmp_path):
 
 
 def test_cache_aliases_and_invalid_value(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": "cache", "meta/": "MIRROR", "config/": "off"})
-    assert store.cache["data/"] == CacheMode.C_CACHE
-    assert store.cache["meta/"] == CacheMode.C_MIRROR
-    assert store.cache["config/"] == CacheMode.C_OFF
+    store, _ = make_store(
+        tmp_path,
+        cache={
+            "data/": {"mode": "cache"},
+            "meta/": {"mode": "MIRROR"},
+            "config/": {"mode": "off"},
+        },
+    )
+    store.create()
+    try:
+        with store:
+            data_name, data_value = "data/00000000", b"abc"
+            meta_name, meta_value = "meta/abcde", b"meta"
+            config_name, config_value = "config/item", b"cfg"
+            store.store(data_name, data_value)
+            store.store(meta_name, meta_value)
+            store.store(config_name, config_value)
+            assert store.load(data_name) == data_value
+            assert store.load(meta_name) == meta_value
+            assert store.load(config_name) == config_value
+    finally:
+        store.destroy()
     with pytest.raises(ValueError):
         make_store(tmp_path, cache={"data/": "on"})
+
+
+def test_cache_policy_dict_and_max_age_validation(tmp_path):
+    store, _ = make_store(
+        tmp_path,
+        cache={
+            "data/": {"mode": "cache", "max_age": 60},
+            "meta/": {"mode": "mirror"},
+            "config/": {"mode": "off", "max_age": 0},
+        },
+    )
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"abc"
+            store.store(name, value)
+            store._cache_invalidate(store.find(name))
+            assert store.load(name) == value
+            assert store.load(name) == value
+            stats = store.stats
+            assert stats["cache_misses"] == 1
+            assert stats["cache_hits"] == 1
+    finally:
+        store.destroy()
+
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"max_age": 1}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "cache", "max_age": -1}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "cache", "max_age": "1"}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "cache", "unexpected": 1}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": "cache"})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": CacheMode.C_CACHE})
+
+
+def test_cache_policy_namedtuple_input(tmp_path):
+    store, _ = make_store(tmp_path, cache={"data/": CachePolicy(mode=CacheMode.C_CACHE, max_age=60.0)})
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"abc"
+            store.store(name, value)
+            store._cache_invalidate(store.find(name))
+            assert store.load(name) == value
+            assert store.load(name) == value
+            stats = store.stats
+            assert stats["cache_misses"] == 1
+            assert stats["cache_hits"] == 1
+    finally:
+        store.destroy()
 
 
 def test_cache_misconfiguration(tmp_path):
     primary_url = (tmp_path / "primary").resolve().as_uri()
     cache_url = (tmp_path / "cache").resolve().as_uri()
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": CacheMode.C_CACHE}, with_cache_backend=False)
+        make_store(tmp_path, cache={"data/": {"mode": "cache"}}, with_cache_backend=False)
     with pytest.raises(ValueError):
-        Store(url=primary_url, levels=LEVELS, cache={"missing/": CacheMode.C_CACHE}, cache_url=cache_url)
+        Store(url=primary_url, levels=LEVELS, cache={"missing/": {"mode": "cache"}}, cache_url=cache_url)
 
 
 def test_cache_off_only_without_backend_is_ok(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": "off"}, with_cache_backend=False)
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": "off"}}, with_cache_backend=False)
     store.create()
     try:
         with store:
@@ -64,7 +136,7 @@ def test_cache_off_only_without_backend_is_ok(tmp_path):
 
 
 def test_c_cache_read_through_and_partial_load(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CacheMode.C_CACHE})
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE}})
     store.create()
     try:
         with store:
@@ -90,7 +162,7 @@ def test_c_cache_read_through_and_partial_load(tmp_path):
 
 
 def test_c_mirror_reads_always_from_primary_and_populates_cache(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CacheMode.C_MIRROR})
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_MIRROR}})
     store.create()
     try:
         with store:
@@ -118,7 +190,7 @@ def test_c_mirror_reads_always_from_primary_and_populates_cache(tmp_path):
 
 @pytest.mark.parametrize("mode", [CacheMode.C_CACHE, CacheMode.C_MIRROR])
 def test_write_delete_and_soft_delete_mirror_cache_entries(tmp_path, mode):
-    store, _ = make_store(tmp_path, cache={"data/": mode})
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": mode}})
     store.create()
     try:
         with store:
@@ -146,7 +218,7 @@ def test_generic_rename_and_change_level_move_cache(tmp_path):
     levels = {"data/": [0, 1]}
     primary_url = (tmp_path / "primary").resolve().as_uri()
     cache_url = (tmp_path / "cache").resolve().as_uri()
-    store = Store(url=primary_url, levels=levels, cache={"data/": CacheMode.C_CACHE}, cache_url=cache_url)
+    store = Store(url=primary_url, levels=levels, cache={"data/": {"mode": CacheMode.C_CACHE}}, cache_url=cache_url)
     store.create()
     try:
         with store:
@@ -167,7 +239,7 @@ def test_generic_rename_and_change_level_move_cache(tmp_path):
 
 
 def test_deleted_reads_use_del_cache_key(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CacheMode.C_CACHE})
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE}})
     store.create()
     try:
         with store:
@@ -195,8 +267,74 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
         store.destroy()
 
 
+def test_c_cache_respects_max_age_since_last_use(tmp_path, monkeypatch):
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE, "max_age": 5}})
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"abc"
+            store.store(name, value)
+            nested_name = store.find(name)
+            store._cache_invalidate(nested_name)
+
+            now = 1000.0
+            atime = 0.0
+
+            def fake_time():
+                return now
+
+            monkeypatch.setattr("borgstore.store.time.time", fake_time)
+            original_info = store.cache_backend.info
+            cache_deletes = {"count": 0}
+            original_cache_delete = store.cache_backend.delete
+
+            def wrapped_info(backend_name):
+                info = original_info(backend_name)
+                if backend_name == nested_name and info.exists:
+                    return info._replace(atime=atime)
+                return info
+
+            store.cache_backend.info = wrapped_info
+
+            def wrapped_cache_delete(backend_name):
+                if backend_name == nested_name:
+                    cache_deletes["count"] += 1
+                return original_cache_delete(backend_name)
+
+            store.cache_backend.delete = wrapped_cache_delete
+
+            calls = {"load": 0}
+            original_load = store.backend.load
+
+            def wrapped(backend_name, size=None, offset=0):
+                calls["load"] += 1
+                return original_load(backend_name, size=size, offset=offset)
+
+            store.backend.load = wrapped
+            try:
+                assert store.load(name) == value  # miss, populate cache at t=1000
+                atime = 1000.0
+                now = 1004.0
+                assert store.load(name) == value  # hit, refresh last-used to t=1004
+                atime = 1004.0
+                now = 1010.0
+                assert store.load(name) == value  # expired, miss again
+            finally:
+                store.backend.load = original_load
+                store.cache_backend.info = original_info
+                store.cache_backend.delete = original_cache_delete
+
+            assert calls["load"] == 2
+            assert cache_deletes["count"] == 2
+            stats = store.stats
+            assert stats["cache_misses"] == 2
+            assert stats["cache_hits"] == 1
+    finally:
+        store.destroy()
+
+
 def test_cache_errors_do_not_fail_main_operations(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CacheMode.C_CACHE})
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE}})
     store.create()
     try:
         with store:
@@ -218,7 +356,10 @@ def test_cache_errors_do_not_fail_main_operations(tmp_path):
 
 
 def test_cache_stats(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CacheMode.C_CACHE, "meta/": CacheMode.C_MIRROR})
+    store, _ = make_store(
+        tmp_path,
+        cache={"data/": {"mode": CacheMode.C_CACHE}, "meta/": {"mode": CacheMode.C_MIRROR}},
+    )
     store.create()
     try:
         with store:
@@ -238,4 +379,87 @@ def test_cache_stats(tmp_path):
             assert stats["cache_disabled"] is False
             assert stats["cache_hit_ratio"] == 1.0
     finally:
+        store.destroy()
+
+
+def test_close_cleans_up_expired_cache_items(tmp_path, monkeypatch):
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE, "max_age": 5}})
+    store.create()
+    name, value = "data/00000000", b"abc"
+    with store:
+        store.store(name, value)
+        nested_name = store.find(name)
+
+    now = 2000.0
+    atime = 1990.0
+
+    def fake_time():
+        return now
+
+    monkeypatch.setattr("borgstore.store.time.time", fake_time)
+    original_list = store.cache_backend.list
+    delete_calls = {"count": 0}
+    original_delete = store.cache_backend.delete
+
+    def wrapped_list(backend_name):
+        for info in original_list(backend_name):
+            full_name = (backend_name + "/" + info.name) if backend_name else info.name
+            if full_name == nested_name and info.exists:
+                yield info._replace(atime=atime)
+            else:
+                yield info
+
+    store.cache_backend.list = wrapped_list
+
+    def wrapped_delete(backend_name):
+        if backend_name == nested_name:
+            delete_calls["count"] += 1
+        return original_delete(backend_name)
+
+    store.cache_backend.delete = wrapped_delete
+    try:
+        store.open()
+        store.close()
+        assert delete_calls["count"] == 1
+
+        atime = 1999.0
+        store.open()
+        store.store(name, value)
+        store.close()
+        assert delete_calls["count"] == 1
+    finally:
+        store.cache_backend.list = original_list
+        store.cache_backend.delete = original_delete
+        store.destroy()
+
+
+def test_close_cleanup_errors_are_best_effort(tmp_path):
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_CACHE, "max_age": 5}})
+    store.create()
+    name, value = "data/00000000", b"abc"
+    with store:
+        store.store(name, value)
+
+    original_list = store.cache_backend.list
+    close_calls = {"count": 0}
+    original_close = store.cache_backend.close
+
+    def failing_list(_backend_name):
+        raise RuntimeError("boom")
+        yield  # pragma: no cover
+
+    def wrapped_close():
+        close_calls["count"] += 1
+        return original_close()
+
+    store.cache_backend.list = failing_list
+    store.cache_backend.close = wrapped_close
+    try:
+        store.open()
+        store.close()
+        assert close_calls["count"] == 1
+        assert store.stats["cache_errors"] >= 1
+    finally:
+        store.cache_backend.list = original_list
+        store.cache_backend.close = original_close
         store.destroy()
