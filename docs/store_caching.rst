@@ -13,8 +13,8 @@ Configuration
 
 Each cache policy can be provided either as:
 
-- ``CachePolicy(mode=..., max_age=...)``
-- ``{"mode": ..., "max_age": ...}``
+- ``CachePolicy(mode=..., max_age=..., size=...)``
+- ``{"mode": ..., "max_age": ..., "size": ...}``
 
 ``mode`` accepts ``CacheMode`` values or string aliases:
 
@@ -27,6 +27,10 @@ Each cache policy can be provided either as:
 ``max_age`` is optional and expressed in seconds since last access. The default
 is ``None`` (no age limit).
 
+``size`` is optional and expressed in bytes. It sets a per-namespace cache size
+budget enforced during ``Store.close()`` by evicting least-recently-used items
+until the namespace total size is within the configured budget.
+
 Example::
 
     from borgstore.store import Store, CacheMode
@@ -35,7 +39,7 @@ Example::
         url="sftp://user@host/repo",
         levels={"data": [2], "meta": [1]},
         cache={
-            "data": {"mode": "writethrough", "max_age": 3600},
+            "data": {"mode": "writethrough", "max_age": 3600, "size": 4 * 1024**3},
             "meta": {"mode": CacheMode.C_MIRROR},
         },
         cache_url="file:///home/user/.cache/borgstore/repo",
@@ -50,20 +54,30 @@ Behavior
   entries in lockstep with primary backend names.
 - If ``max_age`` is configured and a cache item is expired, it is deleted from
   the cache and treated as a cache miss.
-- On ``Store.close()``, cache-enabled namespaces with ``max_age`` configured are
-  scanned and expired cache objects are removed before closing the cache
-  backend.
+- On ``Store.close()``, cache-enabled namespaces are scanned before closing the
+  cache backend. Cleanup order per namespace is:
+
+  1. remove expired cache objects when ``max_age`` is configured,
+  2. if ``size`` is configured, evict the least-recently-used remaining items
+     until the namespace total size is ``<= size``.
+
+  Expired entries are always removed first, even if total size is already below
+  the ``size`` limit.
 - Cache failures are non-fatal and logged as warnings.
 
 Limitations
 -----------
 
-- No cache eviction.
+- Eviction is close-time only (on ``Store.close()``), not continuous during
+  ``store()``/``load()`` operations.
 - No proactive cache validation/revalidation.
 - If an object is deleted in the primary backend by another client, the local
   cache will still have a stale object.
-- ``max_age`` depends on backend ``ItemInfo.atime`` support. If ``atime`` is 0
-  (not implemented), age-based caching behaves as immediate expiry.
+- ``max_age`` and LRU-by-``size`` depend on backend ``ItemInfo.atime`` support.
+  If ``atime`` is 0 (not implemented):
+
+  - using ``max_age`` would empty the cache on ``Store.close()``
+  - using ``size`` would not work in LRU order, because order can't be determined
 
 Statistics
 ----------

@@ -51,6 +51,7 @@ class CacheMode(enum.Enum):
 class CachePolicy(NamedTuple):
     mode: CacheMode
     max_age: Optional[float]
+    size: Optional[int]
 
 
 def get_backend(url, permissions=None, quota=None):
@@ -150,25 +151,28 @@ class Store:
         if isinstance(policy, CachePolicy):
             return policy
         if isinstance(policy, dict):
-            unknown_keys = set(policy) - {"mode", "max_age"}
+            unknown_keys = set(policy) - {"mode", "max_age", "size"}
             if unknown_keys:
                 raise ValueError(f"Invalid cache policy keys: {sorted(unknown_keys)!r}")
             if "mode" not in policy:
                 raise ValueError("Invalid cache policy: 'mode' is required.")
             mode = CacheMode.from_str(policy["mode"])
             max_age = policy.get("max_age")
-            if max_age is None:
-                return CachePolicy(mode=mode, max_age=None)
-            if not isinstance(max_age, (int, float)) or max_age < 0:
-                raise ValueError(f"Invalid cache max_age value: {max_age!r}")
-            return CachePolicy(mode=mode, max_age=float(max_age))
+            if max_age is not None:
+                if not isinstance(max_age, (int, float)) or max_age < 0:
+                    raise ValueError(f"Invalid cache max_age value: {max_age!r}")
+                max_age = float(max_age)
+            size = policy.get("size")
+            if size is not None and (not isinstance(size, int) or size < 0):
+                raise ValueError(f"Invalid cache size value: {size!r}")
+            return CachePolicy(mode=mode, max_age=max_age, size=size)
         raise ValueError("Invalid cache policy: expected dict or CachePolicy.")
 
     def _cache_policy_for(self, name: str) -> CachePolicy:
         for namespace, policy in self.cache_namespaces:
             if name.startswith(namespace):
                 return policy
-        return CachePolicy(mode=CacheMode.C_OFF, max_age=None)
+        return CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
 
     def _cache_is_expired(self, nested_name: str, max_age: Optional[float]) -> bool:
         if max_age is None:
@@ -270,14 +274,25 @@ class Store:
     def _cache_cleanup_expired(self) -> None:
         now = time.time()
         for namespace, policy in self.cache_namespaces:
-            if policy.max_age is None:
+            if policy.max_age is None and policy.size is None:
                 continue
             try:
-                for info in self._cache_list(namespace.rstrip("/")):
-                    if info.directory:
-                        continue
-                    if not info.atime or (now - info.atime) > policy.max_age:
+                items = [info for info in self._cache_list(namespace.rstrip("/")) if not info.directory]
+                if policy.max_age is not None:
+                    remaining_items = []
+                    for info in items:
+                        if not info.atime or (now - info.atime) > policy.max_age:
+                            self._cache_invalidate(info.name)
+                        else:
+                            remaining_items.append(info)
+                    items = remaining_items
+                if policy.size is not None:
+                    total_size = sum(info.size for info in items)
+                    for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
+                        if total_size <= policy.size:
+                            break
                         self._cache_invalidate(info.name)
+                        total_size -= info.size
             except Exception as err:
                 logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
                 self._stats["cache_errors"] += 1

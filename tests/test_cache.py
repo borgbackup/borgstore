@@ -35,8 +35,7 @@ def test_cache_disabled_by_default(tmp_path):
 
 def test_cache_aliases_and_invalid_value(tmp_path):
     store, _ = make_store(
-        tmp_path,
-        cache={"data/": {"mode": "writethrough"}, "meta/": {"mode": "MIRROR"}, "config/": {"mode": "off"}},
+        tmp_path, cache={"data/": {"mode": "writethrough"}, "meta/": {"mode": "MIRROR"}, "config/": {"mode": "off"}}
     )
     store.create()
     try:
@@ -60,9 +59,9 @@ def test_cache_policy_dict_and_max_age_validation(tmp_path):
     store, _ = make_store(
         tmp_path,
         cache={
-            "data/": {"mode": "writethrough", "max_age": 60},
+            "data/": {"mode": "writethrough", "max_age": 60, "size": 1024},
             "meta/": {"mode": "mirror"},
-            "config/": {"mode": "off", "max_age": 0},
+            "config/": {"mode": "off", "max_age": 0, "size": 0},
         },
     )
     store.create()
@@ -86,6 +85,12 @@ def test_cache_policy_dict_and_max_age_validation(tmp_path):
     with pytest.raises(ValueError):
         make_store(tmp_path, cache={"data/": {"mode": "writethrough", "max_age": "1"}})
     with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": -1}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": 1.5}})
+    with pytest.raises(ValueError):
+        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": "1"}})
+    with pytest.raises(ValueError):
         make_store(tmp_path, cache={"data/": {"mode": "writethrough", "unexpected": 1}})
     with pytest.raises(ValueError):
         make_store(tmp_path, cache={"data/": "cache"})
@@ -94,7 +99,7 @@ def test_cache_policy_dict_and_max_age_validation(tmp_path):
 
 
 def test_cache_policy_namedtuple_input(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CachePolicy(mode=CacheMode.C_WRITETHROUGH, max_age=60.0)})
+    store, _ = make_store(tmp_path, cache={"data/": CachePolicy(mode=CacheMode.C_WRITETHROUGH, max_age=60.0, size=512)})
     store.create()
     try:
         with store:
@@ -424,6 +429,89 @@ def test_close_cleans_up_expired_cache_items(tmp_path, monkeypatch):
         store.store(name, value)
         store.close()
         assert delete_calls["count"] == 1
+    finally:
+        store.cache_backend.list = original_list
+        store.cache_backend.delete = original_delete
+        store.destroy()
+
+
+def test_close_cleans_up_lru_cache_items_by_size(tmp_path, monkeypatch):
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "size": 7}})
+    store.create()
+    names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
+    store.open()
+    for name, value in names_values:
+        store.store(name, value)
+    nested_names = [store.find(name) for name, _value in names_values]
+
+    atimes = {nested_names[0]: 100.0, nested_names[1]: 200.0, nested_names[2]: 300.0}
+    sizes = {nested_name: 4 for nested_name in nested_names}
+
+    monkeypatch.setattr("borgstore.store.time.time", lambda: 500.0)
+    original_list = store.cache_backend.list
+    deleted_names = []
+    original_delete = store.cache_backend.delete
+
+    def wrapped_list(backend_name):
+        for info in original_list(backend_name):
+            full_name = (backend_name + "/" + info.name) if backend_name else info.name
+            if full_name in atimes and info.exists:
+                yield info._replace(atime=atimes[full_name], size=sizes[full_name])
+            else:
+                yield info
+
+    def wrapped_delete(backend_name):
+        if backend_name in atimes:
+            deleted_names.append(backend_name)
+        return original_delete(backend_name)
+
+    store.cache_backend.list = wrapped_list
+    store.cache_backend.delete = wrapped_delete
+    try:
+        store.close()
+        assert deleted_names == [nested_names[0], nested_names[1]]
+    finally:
+        store.cache_backend.list = original_list
+        store.cache_backend.delete = original_delete
+        store.destroy()
+
+
+def test_close_cleans_up_expired_before_lru_size_eviction(tmp_path, monkeypatch):
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 50, "size": 7}})
+    store.create()
+    names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
+    store.open()
+    for name, value in names_values:
+        store.store(name, value)
+    nested_names = [store.find(name) for name, _value in names_values]
+
+    now = 1000.0
+    atimes = {nested_names[0]: 900.0, nested_names[1]: 990.0, nested_names[2]: 995.0}
+    sizes = {nested_name: 4 for nested_name in nested_names}
+
+    monkeypatch.setattr("borgstore.store.time.time", lambda: now)
+    original_list = store.cache_backend.list
+    deleted_names = []
+    original_delete = store.cache_backend.delete
+
+    def wrapped_list(backend_name):
+        for info in original_list(backend_name):
+            full_name = (backend_name + "/" + info.name) if backend_name else info.name
+            if full_name in atimes and info.exists:
+                yield info._replace(atime=atimes[full_name], size=sizes[full_name])
+            else:
+                yield info
+
+    def wrapped_delete(backend_name):
+        if backend_name in atimes:
+            deleted_names.append(backend_name)
+        return original_delete(backend_name)
+
+    store.cache_backend.list = wrapped_list
+    store.cache_backend.delete = wrapped_delete
+    try:
+        store.close()
+        assert deleted_names == [nested_names[0], nested_names[1]]
     finally:
         store.cache_backend.list = original_list
         store.cache_backend.delete = original_delete
