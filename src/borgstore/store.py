@@ -447,11 +447,20 @@ class Store:
         """
         nested_name = None
         suffix = DEL_SUFFIX if deleted else None
-        for level in self._get_levels(name):
-            nested_name = nest(name, level, add_suffix=suffix)
-            info = self.backend.info(nested_name)
-            if info.exists:
-                break
+        levels = self._get_levels(name)
+        if len(levels) == 1:
+            # optimize the usual case:
+            # the store is operating this namespace at a single specific level,
+            # thus the item must be at that level, we do not need to search it.
+            nested_name = nest(name, levels[0], add_suffix=suffix)
+        else:
+            # looks like the store is upgrading/downgrading levels,
+            # items could be at old or new levels.
+            for level in levels:
+                nested_name = nest(name, level, add_suffix=suffix)
+                info = self.backend.info(nested_name)
+                if info.exists:
+                    break
         return nested_name
 
     def info(self, name: str, *, deleted=False) -> ItemInfo:
