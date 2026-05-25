@@ -1,6 +1,7 @@
 """Tests for Store optional cache behavior."""
 
 import pytest
+import borgstore.store as store_module
 
 from borgstore.backends.errors import ObjectNotFound
 from borgstore.constants import DEL_SUFFIX
@@ -547,4 +548,91 @@ def test_close_cleanup_errors_are_best_effort(tmp_path):
     finally:
         store.cache_backend.list = original_list
         store.cache_backend.close = original_close
+        store.destroy()
+
+
+def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypatch):
+    monkeypatch.setenv("BORGSTORE_LATENCY", "200000")
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"abc"
+            store.store(name, value)
+
+            nested = store.find(name)
+            store._cache_invalidate(nested)
+
+            original_primary_load = store.backend.load
+            primary_calls = {"count": 0}
+
+            def wrapped_primary_load(backend_name, size=None, offset=0):
+                primary_calls["count"] += 1
+                return original_primary_load(backend_name, size=size, offset=offset)
+
+            sleep_calls = []
+            original_sleep = store_module.time.sleep
+
+            def wrapped_sleep(seconds):
+                sleep_calls.append(seconds)
+
+            monkeypatch.setattr("borgstore.store.time.sleep", wrapped_sleep)
+            store.backend.load = wrapped_primary_load
+            try:
+                assert store.load(name) == value
+                assert primary_calls["count"] == 1
+                sleeps_after_miss = len(sleep_calls)
+                assert sleeps_after_miss >= 1
+
+                assert store.load(name) == value
+                assert primary_calls["count"] == 1
+                # second call still does primary find() checks, but must avoid a primary load()
+                assert len(sleep_calls) == sleeps_after_miss + 1
+            finally:
+                store.backend.load = original_primary_load
+                monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
+    finally:
+        store.destroy()
+
+
+def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypatch):
+    monkeypatch.setenv("BORGSTORE_LATENCY", "0")
+    monkeypatch.setenv("BORGSTORE_BANDWIDTH", "8")  # 1 byte/s
+    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"abc"
+            store.store(name, value)
+            nested = store.find(name)
+            store._cache_invalidate(nested)
+
+            primary_calls = {"count": 0}
+            original_primary_load = store.backend.load
+
+            def wrapped_primary_load(backend_name, size=None, offset=0):
+                primary_calls["count"] += 1
+                return original_primary_load(backend_name, size=size, offset=offset)
+
+            sleep_calls = []
+            original_sleep = store_module.time.sleep
+
+            def wrapped_sleep(seconds):
+                sleep_calls.append(seconds)
+
+            monkeypatch.setattr("borgstore.store.time.sleep", wrapped_sleep)
+            store.backend.load = wrapped_primary_load
+            try:
+                assert store.load(name) == value
+                assert primary_calls["count"] == 1
+                sleeps_after_miss = len(sleep_calls)
+                assert any(seconds >= 2.9 for seconds in sleep_calls)
+
+                assert store.load(name) == value
+                assert primary_calls["count"] == 1
+                assert len(sleep_calls) == sleeps_after_miss
+            finally:
+                store.backend.load = original_primary_load
+                monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
+    finally:
         store.destroy()

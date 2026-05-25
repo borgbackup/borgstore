@@ -311,23 +311,28 @@ class Store:
 
     @contextmanager
     def _stats_updater(self, key, msg):
-        """update call counters and overall times, also emulate latency and bandwidth"""
+        """update call counters and overall times"""
         # do not use this in generators!
-        volume_before = self._stats_get_volume(key)
         start = time.perf_counter_ns()
         yield
-        be_needed_ns = time.perf_counter_ns() - start
-        volume_after = self._stats_get_volume(key)
-        volume = volume_after - volume_before
-        emulated_time = self.latency + (0 if not self.bandwidth else float(volume) / self.bandwidth)
-        remaining_time = emulated_time - be_needed_ns / 1e9
-        if remaining_time > 0.0:
-            time.sleep(remaining_time)
         end = time.perf_counter_ns()
         overall_time = end - start
         self._stats[f"{key}_calls"] += 1
         self._stats[f"{key}_time"] += overall_time
-        logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
+        logger.debug(f"borgstore: {msg} in {overall_time / 1e6:0.1f}ms")
+
+    def _backend_call(self, operation, *, volume=0):
+        # latency and bandwidth emulation is only applied to (primary)
+        # backend calls, not to (secondary) cache backend calls.
+        start = time.perf_counter_ns()
+        result = operation()
+        be_needed_ns = time.perf_counter_ns() - start
+        volume = volume(result) if callable(volume) else volume
+        emulated_time = self.latency + (0 if not self.bandwidth else float(volume) / self.bandwidth)
+        remaining_time = emulated_time - be_needed_ns / 1e9
+        if remaining_time > 0.0:
+            time.sleep(remaining_time)
+        return result
 
     def _stats_update_volume(self, key, amount):
         self._stats[f"{key}_volume"] += amount
@@ -451,22 +456,28 @@ class Store:
 
     def info(self, name: str, *, deleted=False) -> ItemInfo:
         with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
-            return self.backend.info(self.find(name, deleted=deleted))
+            return self._backend_call(lambda: self.backend.info(self.find(name, deleted=deleted)), volume=0)
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
-            nested_name = self.find(name, deleted=deleted)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
             if cache_policy.mode == CacheMode.C_WRITETHROUGH:
                 full_value = self._cache_get(nested_name, max_age=cache_policy.max_age)
                 if full_value is None:
-                    full_value = self.backend.load(nested_name, size=None, offset=0)
+                    full_value = self._backend_call(
+                        lambda: self.backend.load(nested_name, size=None, offset=0), volume=lambda value: len(value)
+                    )
                     self._cache_put(nested_name, full_value)
             elif cache_policy.mode == CacheMode.C_MIRROR:
-                full_value = self.backend.load(nested_name, size=None, offset=0)
+                full_value = self._backend_call(
+                    lambda: self.backend.load(nested_name, size=None, offset=0), volume=lambda value: len(value)
+                )
                 self._cache_put(nested_name, full_value)
             else:
-                result = self.backend.load(nested_name, size=size, offset=offset)
+                result = self._backend_call(
+                    lambda: self.backend.load(nested_name, size=size, offset=offset), volume=lambda value: len(value)
+                )
                 self._stats_update_volume("load", len(result))
                 return result
             result = full_value[offset : (None if size is None else offset + size)]
@@ -478,15 +489,17 @@ class Store:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
         with self._stats_updater("store", f"store({name!r})"):
-            nested_name = self.find(name)
-            self.backend.store(nested_name, value)
+            nested_name = self._backend_call(lambda: self.find(name), volume=0)
+            self._backend_call(lambda: self.backend.store(nested_name, value), volume=len(value))
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_put(nested_name, value)
             self._stats_update_volume("store", len(value))
 
     def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
         with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
-            return self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm)
+            return self._backend_call(
+                lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
+            )
 
     def delete(self, name: str, *, deleted=False) -> None:
         """
@@ -495,8 +508,8 @@ class Store:
         See also .move(name, delete=True) for "soft" deletion.
         """
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
-            nested_name = self.find(name, deleted=deleted)
-            self.backend.delete(nested_name)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
+            self._backend_call(lambda: self.backend.delete(nested_name), volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_invalidate(nested_name)
 
@@ -512,29 +525,29 @@ class Store:
     ) -> None:
         if delete:
             # use case: keep name, but soft "delete" the item
-            nested_name = self.find(name, deleted=False)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=False), volume=0)
             nested_new_name = nested_name + DEL_SUFFIX
             msg = f"soft_delete({name!r}, deleted={deleted})"
         elif undelete:
             # use case: keep name, undelete a previously soft "deleted" item
-            nested_name = self.find(name, deleted=True)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=True), volume=0)
             nested_new_name = nested_name.removesuffix(DEL_SUFFIX)
             msg = f"soft_undelete({name!r}, deleted={deleted})"
         elif change_level:
             # use case: keep name, changing to another nesting level
             suffix = DEL_SUFFIX if deleted else None
-            nested_name = self.find(name, deleted=deleted)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
             nested_new_name = nest(name, self._get_levels(name)[-1], add_suffix=suffix)
             msg = f"change_level({name!r}, deleted={deleted})"
         else:
             # generic use (be careful!)
             if not new_name:
                 raise ValueError("Generic move requires new_name to be given.")
-            nested_name = self.find(name, deleted=deleted)
-            nested_new_name = self.find(new_name, deleted=deleted)
+            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
+            nested_new_name = self._backend_call(lambda: self.find(new_name, deleted=deleted), volume=0)
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
-            self.backend.move(nested_name, nested_new_name)
+            self._backend_call(lambda: self.backend.move(nested_name, nested_new_name), volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_move(nested_name, nested_new_name)
 
