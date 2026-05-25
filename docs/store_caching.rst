@@ -21,7 +21,7 @@ Each cache policy can be provided either as:
 - ``CacheMode.C_OFF`` or ``"off"``: bypass cache completely.
 - ``CacheMode.C_MIRROR`` or ``"mirror"``: always read from primary backend,
   but update the cache after successful primary backend reads and writes.
-- ``CacheMode.C_CACHE`` or ``"cache"``: read-through + write-through.
+- ``CacheMode.C_WRITETHROUGH`` or ``"writethrough"``: read-through + write-through.
   For now, only content-hash addressed namespaces should use this mode.
 
 ``max_age`` is optional and expressed in seconds since last access. The default
@@ -35,7 +35,7 @@ Example::
         url="sftp://user@host/repo",
         levels={"data": [2], "meta": [1]},
         cache={
-            "data": {"mode": "cache", "max_age": 3600},
+            "data": {"mode": "writethrough", "max_age": 3600},
             "meta": {"mode": CacheMode.C_MIRROR},
         },
         cache_url="file:///home/user/.cache/borgstore/repo",

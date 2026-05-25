@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 class CacheMode(enum.Enum):
     C_OFF = "off"
-    C_CACHE = "cache"
     C_MIRROR = "mirror"
+    C_WRITETHROUGH = "writethrough"
 
     @classmethod
     def from_str(cls, value):
@@ -206,7 +206,7 @@ class Store:
                 cache_enabled = (
                     self.cache_backend is not None
                     and not self._cache_disabled
-                    and self._cache_policy_for(f"{namespace}/").mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}
+                    and self._cache_policy_for(f"{namespace}/").mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}
                 )
                 if level == 0:
                     # flat, we just need to create the namespace directory:
@@ -442,7 +442,7 @@ class Store:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
-            if cache_policy.mode == CacheMode.C_CACHE:
+            if cache_policy.mode == CacheMode.C_WRITETHROUGH:
                 full_value = self._cache_get(nested_name, max_age=cache_policy.max_age)
                 if full_value is None:
                     full_value = self.backend.load(nested_name, size=None, offset=0)
@@ -465,7 +465,7 @@ class Store:
         with self._stats_updater("store", f"store({name!r})"):
             nested_name = self.find(name)
             self.backend.store(nested_name, value)
-            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_put(nested_name, value)
             self._stats_update_volume("store", len(value))
 
@@ -482,7 +482,7 @@ class Store:
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
             nested_name = self.find(name, deleted=deleted)
             self.backend.delete(nested_name)
-            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_invalidate(nested_name)
 
     def move(
@@ -520,7 +520,7 @@ class Store:
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
             self.backend.move(nested_name, nested_new_name)
-            if self._cache_policy_for(name).mode in {CacheMode.C_CACHE, CacheMode.C_MIRROR}:
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_move(nested_name, nested_new_name)
 
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:

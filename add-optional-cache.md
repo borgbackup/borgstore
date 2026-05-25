@@ -132,18 +132,19 @@ class CacheMode(enum.Enum):
 New stats fields: `cache_hits`, `cache_misses`, `cache_errors`, `cache_bytes_read`, `cache_bytes_written`, `cache_hit_ratio`.
 
 Usage example:
+
 ```python
 from borgstore.store import Store, CacheMode
 
 store = Store(
-    url="sftp://user@host/repo",
-    levels={"data": [2], "meta": [1], "config": [0]},
-    cache={
-        "data":   CacheMode.C_CACHE,  # read-through + write-through
-        "meta":   "mirror",            # string alias -> CacheMode.C_MIRROR
-        "config": "off",               # string alias -> CacheMode.C_OFF
-    },
-    cache_url="file:///home/u/.cache/borgstore/<repo-id>",
+  url="sftp://user@host/repo",
+  levels={"data": [2], "meta": [1], "config": [0]},
+  cache={
+    "data": CacheMode.C_WRITETHROUGH,  # read-through + write-through
+    "meta": "mirror",  # string alias -> CacheMode.C_MIRROR
+    "config": "off",  # string alias -> CacheMode.C_OFF
+  },
+  cache_url="file:///home/u/.cache/borgstore/<repo-id>",
 )
 ```
 
