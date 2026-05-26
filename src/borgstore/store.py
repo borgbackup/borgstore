@@ -470,7 +470,7 @@ class Store:
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
-            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
+            nested_name = self.find(name, deleted=deleted)
             if cache_policy.mode == CacheMode.C_WRITETHROUGH:
                 full_value = self._cache_get(nested_name, max_age=cache_policy.max_age)
                 if full_value is None:
@@ -498,7 +498,7 @@ class Store:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
         with self._stats_updater("store", f"store({name!r})"):
-            nested_name = self._backend_call(lambda: self.find(name), volume=0)
+            nested_name = self.find(name)
             self._backend_call(lambda: self.backend.store(nested_name, value), volume=len(value))
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_put(nested_name, value)
@@ -517,7 +517,7 @@ class Store:
         See also .move(name, delete=True) for "soft" deletion.
         """
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
-            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
+            nested_name = self.find(name, deleted=deleted)
             self._backend_call(lambda: self.backend.delete(nested_name), volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_invalidate(nested_name)
@@ -534,26 +534,26 @@ class Store:
     ) -> None:
         if delete:
             # use case: keep name, but soft "delete" the item
-            nested_name = self._backend_call(lambda: self.find(name, deleted=False), volume=0)
+            nested_name = self.find(name, deleted=False)
             nested_new_name = nested_name + DEL_SUFFIX
             msg = f"soft_delete({name!r}, deleted={deleted})"
         elif undelete:
             # use case: keep name, undelete a previously soft "deleted" item
-            nested_name = self._backend_call(lambda: self.find(name, deleted=True), volume=0)
+            nested_name = self.find(name, deleted=True)
             nested_new_name = nested_name.removesuffix(DEL_SUFFIX)
             msg = f"soft_undelete({name!r}, deleted={deleted})"
         elif change_level:
             # use case: keep name, changing to another nesting level
             suffix = DEL_SUFFIX if deleted else None
-            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
+            nested_name = self.find(name, deleted=deleted)
             nested_new_name = nest(name, self._get_levels(name)[-1], add_suffix=suffix)
             msg = f"change_level({name!r}, deleted={deleted})"
         else:
             # generic use (be careful!)
             if not new_name:
                 raise ValueError("Generic move requires new_name to be given.")
-            nested_name = self._backend_call(lambda: self.find(name, deleted=deleted), volume=0)
-            nested_new_name = self._backend_call(lambda: self.find(new_name, deleted=deleted), volume=0)
+            nested_name = self.find(name, deleted=deleted)
+            nested_new_name = self.find(new_name, deleted=deleted)
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
             self._backend_call(lambda: self.backend.move(nested_name, nested_new_name), volume=0)

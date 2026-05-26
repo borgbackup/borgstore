@@ -586,8 +586,8 @@ def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypa
 
                 assert store.load(name) == value
                 assert primary_calls["count"] == 1
-                # second call still does primary find() checks, but must avoid a primary load()
-                assert len(sleep_calls) == sleeps_after_miss + 1
+                # cache hit: no primary backend calls at all, so no new sleeps
+                assert len(sleep_calls) == sleeps_after_miss
             finally:
                 store.backend.load = original_primary_load
                 monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
