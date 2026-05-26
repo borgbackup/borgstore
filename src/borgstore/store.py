@@ -26,7 +26,7 @@ from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
 from .backends.s3 import get_s3_backend
 from .backends.rest import get_rest_backend
-from .constants import DEL_SUFFIX
+from .constants import DEL_SUFFIX, ROOTNS
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +427,41 @@ class Store:
         except Exception as err:
             logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
             self._stats["cache_errors"] += 1
+
+    def cache_invalidate(self, name: str, *, deleted: bool = False) -> None:
+        """
+        Invalidate cached items.
+
+        - If name is ROOTNS (""), invalidate caches of all cached namespaces.
+        - If a namespace is given, invalidate all items in that namespace.
+        - If an item name is given, invalidate only that single item.
+        """
+        if self.cache_backend is None or self._cache_disabled:
+            return
+
+        if name == ROOTNS:
+            # Root / all namespaces
+            for namespace, policy in self.cache_namespaces:
+                for info in self._cache_list(namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_invalidate(info.name)
+        else:
+            # Check if name represents a namespace
+            target_namespace = None
+            for namespace, policy in self.cache_namespaces:
+                if namespace.rstrip("/") == name.rstrip("/"):
+                    target_namespace = namespace
+                    break
+
+            if target_namespace is not None:
+                # Invalidate all items in the namespace
+                for info in self._cache_list(target_namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_invalidate(info.name)
+            else:
+                # Invalidate single item
+                nested_name = self.find(name, deleted=deleted)
+                self._cache_invalidate(nested_name)
 
     def _get_levels(self, name):
         """Get levels from the configuration depending on the namespace."""

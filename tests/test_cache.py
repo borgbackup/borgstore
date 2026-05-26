@@ -4,7 +4,7 @@ import pytest
 import borgstore.store as store_module
 
 from borgstore.backends.errors import ObjectNotFound
-from borgstore.constants import DEL_SUFFIX
+from borgstore.constants import DEL_SUFFIX, ROOTNS
 from borgstore.store import CacheMode, CachePolicy, Store
 
 LEVELS = {"data/": [2], "meta/": [1], "config/": [0]}
@@ -634,5 +634,88 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
             finally:
                 store.backend.load = original_primary_load
                 monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
+    finally:
+        store.destroy()
+
+
+def test_public_cache_invalidate(tmp_path):
+    store, _ = make_store(
+        tmp_path,
+        cache={
+            "data/": {"mode": CacheMode.C_WRITETHROUGH},
+            "meta/": {"mode": CacheMode.C_WRITETHROUGH},
+        },
+    )
+    store.create()
+    try:
+        with store:
+            name1 = "data/00000000"
+            name2 = "data/00000001"
+            name3 = "meta/abcde"
+            val1, val2, val3 = b"val1", b"val2", b"val3"
+
+            # Scenario 1: Invalidate a single item
+            store.store(name1, val1)
+            # Verify cache hit
+            assert store.load(name1) == val1
+            before_stats = store.stats
+            assert before_stats["cache_hits"] == 1
+            assert before_stats["cache_misses"] == 0
+
+            # Invalidate name1
+            store.cache_invalidate(name1)
+
+            # Loading name1 should miss and fetch from primary backend
+            assert store.load(name1) == val1
+            after_stats = store.stats
+            assert after_stats["cache_hits"] == 1  # unchanged
+            assert after_stats["cache_misses"] == 1  # incremented
+
+            # Scenario 2: Invalidate a namespace (e.g. "data/")
+            store.store(name1, val1)
+            store.store(name2, val2)
+            store.store(name3, val3)
+
+            # Prime hits for all
+            assert store.load(name1) == val1
+            assert store.load(name2) == val2
+            assert store.load(name3) == val3
+
+            stats_before_ns = store.stats
+
+            # Invalidate "data/" namespace
+            store.cache_invalidate("data/")
+
+            # Reads on "data/" items should miss, meta item should still hit
+            assert store.load(name1) == val1
+            assert store.load(name2) == val2
+            assert store.load(name3) == val3
+
+            stats_after_ns = store.stats
+            assert stats_after_ns["cache_misses"] == stats_before_ns["cache_misses"] + 2
+            assert stats_after_ns["cache_hits"] == stats_before_ns["cache_hits"] + 1  # meta/abcde hit
+
+            # Scenario 3: Invalidate root/all namespaces using ROOTNS
+            store.store(name1, val1)
+            store.store(name3, val3)
+            # Prime hits
+            assert store.load(name1) == val1
+            assert store.load(name3) == val3
+
+            stats_before_root = store.stats
+
+            # Invalidate all (ROOTNS)
+            store.cache_invalidate(ROOTNS)
+
+            assert store.load(name1) == val1
+            assert store.load(name3) == val3
+
+            stats_after_root = store.stats
+            assert stats_after_root["cache_misses"] == stats_before_root["cache_misses"] + 2
+            assert stats_after_root["cache_hits"] == stats_before_root["cache_hits"]  # no new hits
+
+            # Scenario 4: Verify that omitting the name parameter raises TypeError (mandatory parameter)
+            with pytest.raises(TypeError):
+                store.cache_invalidate()  # type: ignore[call-overload]
     finally:
         store.destroy()
