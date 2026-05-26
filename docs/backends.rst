@@ -82,6 +82,12 @@ Use storage on a local POSIX filesystem:
       # ...
       store.close()
 
+Note:
+
+When using posixfs as a caching backend, it needs to use a filesystem with
+``atime`` support for ``max_age`` and LRU-based ``size`` limits to work as
+expected.
+
 sftp
 ----
 

@@ -107,6 +107,9 @@ Limitations
   - using ``max_age`` would empty the cache on ``Store.close()``
   - using ``size`` would not work in LRU order, because order can't be
     determined
+- If a partial range ``load`` call for an object in a cached namespace causes
+  a cache miss, the full object will be read from the primary backend and the
+  cache will be populated with the full object.
 
 Statistics
 ----------

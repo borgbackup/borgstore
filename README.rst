@@ -24,6 +24,9 @@ Store features
 - supports URLs, like `file:///srv/borgstore` or `https://myserver/path`
 - easy to use, high-level `Store` API: create/destroy, open/close, list,
   load/store, delete, move, soft delete/undelete, hash, defrag, ...
+- uses a backend to implement the storage
+- optionally uses an additional caching backend, with a configurable cache
+  policy per namespace
 - name nesting / unnesting, recursive directory listing
 - statistics collection
 - latency/bandwidth emulator
