@@ -313,13 +313,15 @@ class Store:
     def _stats_updater(self, key, msg):
         """update call counters and overall times"""
         # do not use this in generators!
+        volume_before = self._stats_get_volume(key)
         start = time.perf_counter_ns()
         yield
         end = time.perf_counter_ns()
         overall_time = end - start
+        volume = self._stats_get_volume(key) - volume_before
         self._stats[f"{key}_calls"] += 1
         self._stats[f"{key}_time"] += overall_time
-        logger.debug(f"borgstore: {msg} in {overall_time / 1e6:0.1f}ms")
+        logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
 
     def _backend_call(self, operation, *, volume=0):
         # latency and bandwidth emulation is only applied to (primary)
