@@ -21,15 +21,17 @@ Each cache policy can be provided either as:
 - ``CacheMode.C_OFF`` or ``"off"``: bypass cache completely.
 - ``CacheMode.C_MIRROR`` or ``"mirror"``: always read from primary backend,
   but update the cache after successful primary backend reads and writes.
-- ``CacheMode.C_WRITETHROUGH`` or ``"writethrough"``: read-through + write-through.
+- ``CacheMode.C_WRITETHROUGH`` or ``"writethrough"``: read-through +
+  write-through.
   For now, only content-hash addressed namespaces should use this mode.
 
 ``max_age`` is optional and expressed in seconds since last access. The default
 is ``None`` (no age limit).
 
-``size`` is optional and expressed in bytes. It sets a per-namespace cache size
-budget enforced during ``Store.close()`` by evicting least-recently-used items
-until the namespace total size is within the configured budget.
+``size`` is optional and expressed in bytes. It sets a per-namespace cache
+size budget enforced during ``Store.close()`` by evicting
+least-recently-used items until the namespace total size is within the
+configured budget.
 
 Example::
 
@@ -39,7 +41,11 @@ Example::
         url="sftp://user@host/repo",
         levels={"data": [2], "meta": [1]},
         cache={
-            "data": {"mode": "writethrough", "max_age": 3600, "size": 4 * 1024**3},
+            "data": {
+                "mode": "writethrough",
+                "max_age": 3600,
+                "size": 4 * 1024**3,
+            },
             "meta": {"mode": CacheMode.C_MIRROR},
         },
         cache_url="file:///home/user/.cache/borgstore/repo",
@@ -54,8 +60,8 @@ Behavior
   entries in lockstep with primary backend names.
 - If ``max_age`` is configured and a cache item is expired, it is deleted from
   the cache and treated as a cache miss.
-- On ``Store.close()``, cache-enabled namespaces are scanned before closing the
-  cache backend. Cleanup order per namespace is:
+- On ``Store.close()``, cache-enabled namespaces are scanned before closing
+  the cache backend. Cleanup order per namespace is:
 
   1. remove expired cache objects when ``max_age`` is configured,
   2. if ``size`` is configured, evict the least-recently-used remaining items
@@ -68,7 +74,10 @@ Behavior
 Manual Cache Invalidation
 -------------------------
 
-If you need to programmatically clear or invalidate parts of the cache (for example, to resolve stale objects after primary backend deletes by other clients, or if cache corruption is suspected), you can use the ``cache_invalidate`` method:
+If you need to programmatically clear or invalidate parts of the cache (for
+example, to resolve stale objects after primary backend deletes by other
+clients, or if cache corruption is suspected), you can use the
+``cache_invalidate`` method:
 
 - To invalidate a single item::
 
@@ -78,7 +87,8 @@ If you need to programmatically clear or invalidate parts of the cache (for exam
 
       store.cache_invalidate("data/")
 
-- To invalidate all cached items across all configured namespaces, pass ``ROOTNS``::
+- To invalidate all cached items across all configured namespaces, pass
+  ``ROOTNS``::
 
       from borgstore.constants import ROOTNS
       store.cache_invalidate(ROOTNS)
@@ -95,7 +105,8 @@ Limitations
   If ``atime`` is 0 (not implemented):
 
   - using ``max_age`` would empty the cache on ``Store.close()``
-  - using ``size`` would not work in LRU order, because order can't be determined
+  - using ``size`` would not work in LRU order, because order can't be
+    determined
 
 Statistics
 ----------
