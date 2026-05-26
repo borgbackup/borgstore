@@ -65,6 +65,24 @@ Behavior
   the ``size`` limit.
 - Cache failures are non-fatal and logged as warnings.
 
+Manual Cache Invalidation
+-------------------------
+
+If you need to programmatically clear or invalidate parts of the cache (for example, to resolve stale objects after primary backend deletes by other clients, or if cache corruption is suspected), you can use the ``cache_invalidate`` method:
+
+- To invalidate a single item::
+
+      store.cache_invalidate("data/00000000")
+
+- To invalidate all cached items in a specific namespace (e.g. ``"data/"``)::
+
+      store.cache_invalidate("data/")
+
+- To invalidate all cached items across all configured namespaces, pass ``ROOTNS``::
+
+      from borgstore.constants import ROOTNS
+      store.cache_invalidate(ROOTNS)
+
 Limitations
 -----------
 
