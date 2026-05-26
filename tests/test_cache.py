@@ -70,7 +70,7 @@ def test_cache_policy_dict_and_max_age_validation(tmp_path):
         with store:
             name, value = "data/00000000", b"abc"
             store.store(name, value)
-            store._cache_invalidate(store.find(name))
+            store.cache_invalidate(name)
             assert store.load(name) == value
             assert store.load(name) == value
             stats = store.stats
@@ -106,7 +106,7 @@ def test_cache_policy_namedtuple_input(tmp_path):
         with store:
             name, value = "data/00000000", b"abc"
             store.store(name, value)
-            store._cache_invalidate(store.find(name))
+            store.cache_invalidate(name)
             assert store.load(name) == value
             assert store.load(name) == value
             stats = store.stats
@@ -144,7 +144,7 @@ def test_c_cache_read_through_and_partial_load(tmp_path):
         with store:
             name, value = "data/00000000", b"0123456789"
             store.store(name, value)
-            store._cache_invalidate(store.find(name))
+            store.cache_invalidate(name)
             calls = {"load": 0}
             original_load = store.backend.load
 
@@ -251,7 +251,7 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
             nested = store.find(name)
             store.store(name, value)
             store.move(name, delete=True)
-            store._cache_invalidate(nested + DEL_SUFFIX)
+            store.cache_invalidate(name, deleted=True)
             calls = {"load": 0}
             original_load = store.backend.load
 
@@ -279,7 +279,7 @@ def test_c_cache_respects_max_age_since_last_use(tmp_path, monkeypatch):
             name, value = "data/00000000", b"abc"
             store.store(name, value)
             nested_name = store.find(name)
-            store._cache_invalidate(nested_name)
+            store.cache_invalidate(name)
 
             now = 1000.0
             atime = 0.0
@@ -560,8 +560,7 @@ def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypa
             name, value = "data/00000000", b"abc"
             store.store(name, value)
 
-            nested = store.find(name)
-            store._cache_invalidate(nested)
+            store.cache_invalidate(name)
 
             original_primary_load = store.backend.load
             primary_calls = {"count": 0}
@@ -604,8 +603,7 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
         with store:
             name, value = "data/00000000", b"abc"
             store.store(name, value)
-            nested = store.find(name)
-            store._cache_invalidate(nested)
+            store.cache_invalidate(name)
 
             primary_calls = {"count": 0}
             original_primary_load = store.backend.load
