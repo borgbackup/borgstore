@@ -582,6 +582,11 @@ class Store:
         if target is not None:
             target = self.find(prefix + target, deleted=deleted)
 
+        # Note: defrag does not interact with the cache. It creates a new item from
+        # the chunks of the source items we want to keep. It does not delete the source
+        # items; that is the task of the caller after defrag successfully returns the new
+        # item name. If the caller subsequently deletes the source items, they will be
+        # removed from the cache.
         levels = self._get_levels(prefix)[-1] if prefix else 0
         backend_target = self.backend.defrag(
             mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
@@ -597,6 +602,10 @@ class Store:
 
         backend.list giving us sorted names implies Store.list is also sorted,
         if all items are stored on the same level.
+
+        Note: list bypasses the cache and always queries the primary backend to ensure we
+        only return items that really exist there, even if other clients have updated or
+        deleted items directly in the primary backend.
         """
         # we need this wrapper due to the recursion - we only want to increment list_calls once:
         logger.debug(f"borgstore: list_start({name!r}, deleted={deleted})")
