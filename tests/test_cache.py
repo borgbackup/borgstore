@@ -145,20 +145,14 @@ def test_c_cache_read_through_and_partial_load(tmp_path):
             name, value = "data/00000000", b"0123456789"
             store.store(name, value)
             store.cache_invalidate(name)
-            calls = {"load": 0}
-            original_load = store.backend.load
 
-            def wrapped(name, size=None, offset=0):
-                calls["load"] += 1
-                return original_load(name, size=size, offset=offset)
+            assert store.load(name) == value
+            assert store.load(name, size=4, offset=2) == value[2:6]
 
-            store.backend.load = wrapped
-            try:
-                assert store.load(name) == value
-                assert store.load(name, size=4, offset=2) == value[2:6]
-            finally:
-                store.backend.load = original_load
-            assert calls["load"] == 1
+            stats = store.stats
+            assert stats["cache_load_calls"] == 2
+            assert stats["cache_hits"] == 1
+            assert stats["cache_misses"] == 1
     finally:
         store.destroy()
 
@@ -171,20 +165,14 @@ def test_c_mirror_reads_always_from_primary_and_populates_cache(tmp_path):
             name, value = "data/00000000", b"abc"
             nested_name = store.find(name)
             store.backend.store(nested_name, value)
-            calls = {"load": 0}
-            original_load = store.backend.load
 
-            def wrapped(name, size=None, offset=0):
-                calls["load"] += 1
-                return original_load(name, size=size, offset=offset)
+            assert store.load(name) == value
+            assert store.load(name) == value
 
-            store.backend.load = wrapped
-            try:
-                assert store.load(name) == value
-                assert store.load(name) == value
-            finally:
-                store.backend.load = original_load
-            assert calls["load"] == 2
+            stats = store.stats
+            assert stats["cache_load_calls"] == 0
+            assert stats["cache_store_calls"] == 2
+            assert stats["load_calls"] == 2
             assert store.cache_backend.load(nested_name) == value
     finally:
         store.destroy()
@@ -252,20 +240,14 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
             store.store(name, value)
             store.move(name, delete=True)
             store.cache_invalidate(name, deleted=True)
-            calls = {"load": 0}
-            original_load = store.backend.load
 
-            def wrapped(name, size=None, offset=0):
-                calls["load"] += 1
-                return original_load(name, size=size, offset=offset)
+            assert store.load(name, deleted=True) == value
+            assert store.load(name, deleted=True) == value
 
-            store.backend.load = wrapped
-            try:
-                assert store.load(name, deleted=True) == value
-                assert store.load(name, deleted=True) == value
-            finally:
-                store.backend.load = original_load
-            assert calls["load"] == 1
+            stats = store.stats
+            assert stats["cache_load_calls"] == 2
+            assert stats["cache_hits"] == 1
+            assert stats["cache_misses"] == 1
             assert store.cache_backend.load(nested + DEL_SUFFIX) == value
     finally:
         store.destroy()
@@ -307,14 +289,6 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
 
             store.cache_backend.delete = wrapped_cache_delete
 
-            calls = {"load": 0}
-            original_load = store.backend.load
-
-            def wrapped(backend_name, size=None, offset=0):
-                calls["load"] += 1
-                return original_load(backend_name, size=size, offset=offset)
-
-            store.backend.load = wrapped
             try:
                 assert store.load(name) == value  # miss, populate cache at t=1000
                 atime = 1000.0
@@ -323,15 +297,14 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
                 now = 1010.0  # past max_age (5s)
                 assert store.load(name) == value  # still hit (lazy/no read-time expiration)
             finally:
-                store.backend.load = original_load
                 store.cache_backend.info = original_info
                 store.cache_backend.delete = original_cache_delete
 
-            assert calls["load"] == 1  # only 1 load from primary backend (the first miss)
             assert cache_deletes["count"] == 0  # no deletes during load/read
             stats = store.stats
             assert stats["cache_misses"] == 1
             assert stats["cache_hits"] == 2
+            assert stats["cache_load_calls"] == 3
     finally:
         store.destroy()
 
