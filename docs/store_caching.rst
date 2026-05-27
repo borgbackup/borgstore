@@ -56,10 +56,7 @@ Behavior
 
 - Cache keys are identical to primary backend keys (same nesting).
 - Soft-deleted items are cached under the same ``.del`` name as primary.
-- Soft delete/undelete (``move(delete=True|undelete=True)``) renames cache
-  entries in lockstep with primary backend names.
-- If ``max_age`` is configured and a cache item is expired, it is deleted from
-  the cache and treated as a cache miss.
+- Soft delete/undelete renames cache entries as well.
 - On ``Store.close()``, cache-enabled namespaces are scanned before closing
   the cache backend. Cleanup order per namespace is:
 
@@ -96,8 +93,8 @@ clients, or if cache corruption is suspected), you can use the
 Limitations
 -----------
 
-- Eviction is close-time only (on ``Store.close()``), not continuous during
-  ``store()``/``load()`` operations.
+- Eviction by ``max_age`` or ``size`` is close-time only (``Store.close()``),
+  not continuous during ``store()``/``load()`` operations.
 - No proactive cache validation/revalidation.
 - If an object is deleted in the primary backend by another client, the local
   cache will still have a stale object.

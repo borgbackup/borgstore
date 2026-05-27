@@ -174,23 +174,6 @@ class Store:
                 return policy
         return CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
 
-    def _cache_is_expired(self, nested_name: str, max_age: Optional[float]) -> bool:
-        if max_age is None:
-            return False
-        if self.cache_backend is None or self._cache_disabled:
-            return True
-        try:
-            info = self.cache_backend.info(nested_name)
-        except ObjectNotFound:
-            return True
-        except Exception as err:
-            logger.warning(f"borgstore: cache info failed for {nested_name!r}: {err!r}")
-            self._stats["cache_errors"] += 1
-            return True
-        if not info.atime:
-            return True
-        return (time.time() - info.atime) > max_age
-
     def set_levels(self, levels: dict, create: bool = False) -> None:
         if not levels or not isinstance(levels, dict):
             raise ValueError("No or invalid levels configuration given.")
@@ -376,12 +359,8 @@ class Store:
         st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
         return st
 
-    def _cache_get(self, nested_name: str, *, max_age: Optional[float] = None) -> Optional[bytes]:
+    def _cache_get(self, nested_name: str) -> Optional[bytes]:
         if self.cache_backend is None or self._cache_disabled:
-            return None
-        if self._cache_is_expired(nested_name, max_age):
-            self._cache_invalidate(nested_name)
-            self._stats["cache_misses"] += 1
             return None
         try:
             value = self.cache_backend.load(nested_name)
@@ -509,7 +488,7 @@ class Store:
             cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
             if cache_policy.mode == CacheMode.C_WRITETHROUGH:
-                full_value = self._cache_get(nested_name, max_age=cache_policy.max_age)
+                full_value = self._cache_get(nested_name)
                 if full_value is None:
                     full_value = self._backend_call(
                         lambda: self.backend.load(nested_name, size=None, offset=0), volume=lambda value: len(value)

@@ -271,7 +271,7 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
         store.destroy()
 
 
-def test_c_cache_respects_max_age_since_last_use(tmp_path, monkeypatch):
+def test_c_cache_does_not_expire_on_read_but_on_close(tmp_path, monkeypatch):
     store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
     store.create()
     try:
@@ -319,20 +319,19 @@ def test_c_cache_respects_max_age_since_last_use(tmp_path, monkeypatch):
                 assert store.load(name) == value  # miss, populate cache at t=1000
                 atime = 1000.0
                 now = 1004.0
-                assert store.load(name) == value  # hit, refresh last-used to t=1004
-                atime = 1004.0
-                now = 1010.0
-                assert store.load(name) == value  # expired, miss again
+                assert store.load(name) == value  # hit
+                now = 1010.0  # past max_age (5s)
+                assert store.load(name) == value  # still hit (lazy/no read-time expiration)
             finally:
                 store.backend.load = original_load
                 store.cache_backend.info = original_info
                 store.cache_backend.delete = original_cache_delete
 
-            assert calls["load"] == 2
-            assert cache_deletes["count"] == 2
+            assert calls["load"] == 1  # only 1 load from primary backend (the first miss)
+            assert cache_deletes["count"] == 0  # no deletes during load/read
             stats = store.stats
-            assert stats["cache_misses"] == 2
-            assert stats["cache_hits"] == 1
+            assert stats["cache_misses"] == 1
+            assert stats["cache_hits"] == 2
     finally:
         store.destroy()
 
