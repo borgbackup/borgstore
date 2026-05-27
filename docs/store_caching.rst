@@ -9,28 +9,27 @@ Configuration
 -------------
 
 - ``cache_url`` or ``cache_backend``: where cached data is stored
-- ``cache``: mapping of namespace to cache policy
+- ``config``: mapping of namespace to its configuration dict, containing
+  nesting levels and cache policy settings.
 
-Each cache policy can be provided either as:
+Each namespace configuration dictionary can have:
 
-- ``CachePolicy(mode=..., max_age=..., size=...)``
-- ``{"mode": ..., "max_age": ..., "size": ...}``
+- ``levels``: a required list of integers specifying nesting levels.
+- ``cache``: optional cache mode, accepting ``CacheMode`` values or string
+  aliases:
 
-``mode`` accepts ``CacheMode`` values or string aliases:
+  - ``CacheMode.C_OFF`` or ``"off"``: bypass cache completely (default).
+  - ``CacheMode.C_MIRROR`` or ``"mirror"``: always read from primary backend,
+    but update the cache after successful primary backend reads and writes.
+  - ``CacheMode.C_WRITETHROUGH`` or ``"writethrough"``: read-through +
+    write-through. For now, only content-hash addressed namespaces should
+    use this mode.
 
-- ``CacheMode.C_OFF`` or ``"off"``: bypass cache completely.
-- ``CacheMode.C_MIRROR`` or ``"mirror"``: always read from primary backend,
-  but update the cache after successful primary backend reads and writes.
-- ``CacheMode.C_WRITETHROUGH`` or ``"writethrough"``: read-through +
-  write-through.
-  For now, only content-hash addressed namespaces should use this mode.
-
-``max_age`` is optional and expressed in seconds since last access. The default
-is ``None`` (no age limit).
-
-``size`` is optional and expressed in bytes. It sets a per-namespace cache
-size budget enforced by evicting least-recently-used items until the namespace
-total size is within the configured budget.
+- ``max_age``: optional maximum age expressed in seconds since last access.
+  The default is ``None`` (no age limit).
+- ``size``: optional maximum size in bytes. It sets a per-namespace cache
+  size budget enforced by evicting least-recently-used items until the
+  namespace total size is within the configured budget.
 
 Example::
 
@@ -38,14 +37,17 @@ Example::
 
     store = Store(
         url="sftp://user@host/repo",
-        levels={"data": [2], "meta": [1]},
-        cache={
+        config={
             "data": {
-                "mode": "writethrough",
+                "levels": [2],
+                "cache": "writethrough",
                 "max_age": 3600,
                 "size": 4 * 1024**3,
             },
-            "meta": {"mode": CacheMode.C_MIRROR},
+            "meta": {
+                "levels": [1],
+                "cache": CacheMode.C_MIRROR,
+            },
         },
         cache_url="file:///home/user/.cache/borgstore/repo",
     )

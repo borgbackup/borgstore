@@ -19,11 +19,11 @@ def run_demo(storage_url):
         h = new("sha256", data)
         return f"data/{h.hexdigest()}"
 
-    levels_config = {
-        "config/": [0],  # no nesting needed/wanted for the configs
-        "data/": [2],  # 2 nesting levels wanted for the data
+    config = {
+        "config/": {"levels": [0]},  # no nesting needed/wanted for the configs
+        "data/": {"levels": [2]},  # 2 nesting levels wanted for the data
     }
-    store = Store(url=storage_url, levels=levels_config)
+    store = Store(url=storage_url, config=config)
     try:
         store.create()
     except FileExistsError:

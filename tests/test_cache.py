@@ -5,24 +5,39 @@ import borgstore.store as store_module
 
 from borgstore.backends.errors import ObjectNotFound
 from borgstore.constants import DEL_SUFFIX, ROOTNS
-from borgstore.store import CacheMode, CachePolicy, Store
+from borgstore.store import CacheMode, Store
 
-LEVELS = {"data/": [2], "meta/": [1], "config/": [0]}
+BASE_LEVELS = {"data/": [2], "meta/": [1], "config/": [0]}
+BASE_CONFIG = {"data/": {"levels": [2]}, "meta/": {"levels": [1]}, "config/": {"levels": [0]}}
 
 
-def make_store(tmp_path, *, cache=None, with_cache_backend=True):
+def make_config(cache_overrides=None, **extra):
+    """Build a full config dict, merging BASE_LEVELS with optional per-namespace cache settings.
+
+    cache_overrides: dict mapping namespace -> dict of cache keys ("cache", "max_age", "size")
+    """
+    result = {}
+    for ns, levels in BASE_LEVELS.items():
+        ns_cfg = {"levels": levels}
+        if cache_overrides and ns in cache_overrides:
+            ns_cfg.update(cache_overrides[ns])
+        result[ns] = ns_cfg
+    return result
+
+
+def make_store(tmp_path, *, config=None, with_cache_backend=True):
     primary = (tmp_path / "primary").resolve()
     cache_root = (tmp_path / "cache").resolve()
-    kwargs = {"url": primary.as_uri(), "levels": LEVELS}
-    if cache is not None:
-        kwargs["cache"] = cache
+    if config is None:
+        config = BASE_CONFIG
+    kwargs = {"url": primary.as_uri(), "config": config}
     if with_cache_backend:
         kwargs["cache_url"] = cache_root.as_uri()
     return Store(**kwargs), cache_root
 
 
 def test_cache_disabled_by_default(tmp_path):
-    store, cache_root = make_store(tmp_path, cache=None, with_cache_backend=False)
+    store, cache_root = make_store(tmp_path, config=None, with_cache_backend=False)
     store.create()
     try:
         with store:
@@ -36,7 +51,10 @@ def test_cache_disabled_by_default(tmp_path):
 
 def test_cache_aliases_and_invalid_value(tmp_path):
     store, _ = make_store(
-        tmp_path, cache={"data/": {"mode": "writethrough"}, "meta/": {"mode": "MIRROR"}, "config/": {"mode": "off"}}
+        tmp_path,
+        config=make_config(
+            {"data/": {"cache": "writethrough"}, "meta/": {"cache": "mirror"}, "config/": {"cache": "off"}}
+        ),
     )
     store.create()
     try:
@@ -53,17 +71,19 @@ def test_cache_aliases_and_invalid_value(tmp_path):
     finally:
         store.destroy()
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": "on"})
+        make_store(tmp_path, config={"data/": {"levels": [2], "cache": "on"}})
 
 
 def test_cache_policy_dict_and_max_age_validation(tmp_path):
     store, _ = make_store(
         tmp_path,
-        cache={
-            "data/": {"mode": "writethrough", "max_age": 60, "size": 1024},
-            "meta/": {"mode": "mirror"},
-            "config/": {"mode": "off", "max_age": 0, "size": 0},
-        },
+        config=make_config(
+            {
+                "data/": {"cache": "writethrough", "max_age": 60, "size": 1024},
+                "meta/": {"cache": "mirror"},
+                "config/": {"cache": "off", "max_age": 0, "size": 0},
+            }
+        ),
     )
     store.create()
     try:
@@ -80,27 +100,30 @@ def test_cache_policy_dict_and_max_age_validation(tmp_path):
         store.destroy()
 
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"max_age": 1}})
+        make_store(tmp_path, config={"data/": {"max_age": 1}})  # missing levels
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "max_age": -1}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "max_age": -1}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "max_age": "1"}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "max_age": "1"}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": -1}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "size": -1}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": 1.5}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "size": 1.5}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "size": "1"}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "size": "1"}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough", "unexpected": 1}})
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough", "unexpected": 1}}))
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": "cache"})
+        make_store(tmp_path, config="bad")  # config itself must be a dict
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": CacheMode.C_WRITETHROUGH})
+        make_store(tmp_path, config={"data/": "bad"})  # ns_config must be a dict
 
 
-def test_cache_policy_namedtuple_input(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": CachePolicy(mode=CacheMode.C_WRITETHROUGH, max_age=60.0, size=512)})
+def test_cache_mode_enum_input(tmp_path):
+    """CacheMode enum values are accepted as the 'cache' key in namespace config."""
+    store, _ = make_store(
+        tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "max_age": 60.0, "size": 512}})
+    )
     store.create()
     try:
         with store:
@@ -117,16 +140,13 @@ def test_cache_policy_namedtuple_input(tmp_path):
 
 
 def test_cache_misconfiguration(tmp_path):
-    primary_url = (tmp_path / "primary").resolve().as_uri()
-    cache_url = (tmp_path / "cache").resolve().as_uri()
     with pytest.raises(ValueError):
-        make_store(tmp_path, cache={"data/": {"mode": "writethrough"}}, with_cache_backend=False)
-    with pytest.raises(ValueError):
-        Store(url=primary_url, levels=LEVELS, cache={"missing/": {"mode": "writethrough"}}, cache_url=cache_url)
+        # cache enabled but no cache backend given
+        make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough"}}), with_cache_backend=False)
 
 
 def test_cache_off_only_without_backend_is_ok(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": "off"}}, with_cache_backend=False)
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": "off"}}), with_cache_backend=False)
     store.create()
     try:
         with store:
@@ -138,7 +158,7 @@ def test_cache_off_only_without_backend_is_ok(tmp_path):
 
 
 def test_c_cache_read_through_and_partial_load(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
     store.create()
     try:
         with store:
@@ -158,7 +178,7 @@ def test_c_cache_read_through_and_partial_load(tmp_path):
 
 
 def test_c_mirror_reads_always_from_primary_and_populates_cache(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_MIRROR}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_MIRROR}}))
     store.create()
     try:
         with store:
@@ -180,7 +200,7 @@ def test_c_mirror_reads_always_from_primary_and_populates_cache(tmp_path):
 
 @pytest.mark.parametrize("mode", [CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR])
 def test_write_delete_and_soft_delete_mirror_cache_entries(tmp_path, mode):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": mode}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": mode}}))
     store.create()
     try:
         with store:
@@ -205,11 +225,10 @@ def test_write_delete_and_soft_delete_mirror_cache_entries(tmp_path, mode):
 
 
 def test_generic_rename_and_change_level_move_cache(tmp_path):
-    levels = {"data/": [0, 1]}
     primary_url = (tmp_path / "primary").resolve().as_uri()
     cache_url = (tmp_path / "cache").resolve().as_uri()
     store = Store(
-        url=primary_url, levels=levels, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}}, cache_url=cache_url
+        url=primary_url, config={"data/": {"levels": [0, 1], "cache": CacheMode.C_WRITETHROUGH}}, cache_url=cache_url
     )
     store.create()
     try:
@@ -231,7 +250,7 @@ def test_generic_rename_and_change_level_move_cache(tmp_path):
 
 
 def test_deleted_reads_use_del_cache_key(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
     store.create()
     try:
         with store:
@@ -254,7 +273,7 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
 
 
 def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "max_age": 5}}))
     store.create()
     try:
         with store:
@@ -300,7 +319,7 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
 
 
 def test_cache_errors_do_not_fail_main_operations(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
     store.create()
     try:
         with store:
@@ -323,7 +342,8 @@ def test_cache_errors_do_not_fail_main_operations(tmp_path):
 
 def test_cache_stats(tmp_path):
     store, _ = make_store(
-        tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}, "meta/": {"mode": CacheMode.C_MIRROR}}
+        tmp_path,
+        config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}, "meta/": {"cache": CacheMode.C_MIRROR}}),
     )
     store.create()
     try:
@@ -350,7 +370,7 @@ def test_cache_stats(tmp_path):
 
 
 def test_open_cleans_up_expired_cache_items(tmp_path, monkeypatch):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "max_age": 5}}))
     store.create()
     name, value = "data/00000000", b"abc"
     with store:
@@ -393,7 +413,7 @@ def test_open_cleans_up_expired_cache_items(tmp_path, monkeypatch):
 
 
 def test_close_cleans_up_lru_cache_items_by_size(tmp_path, monkeypatch):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "size": 7}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "size": 7}}))
     store.create()
     names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
     store.open()
@@ -434,7 +454,9 @@ def test_close_cleans_up_lru_cache_items_by_size(tmp_path, monkeypatch):
 
 
 def test_close_cleans_up_expired_before_lru_size_eviction(tmp_path, monkeypatch):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 50, "size": 7}})
+    store, _ = make_store(
+        tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "max_age": 50, "size": 7}})
+    )
     store.create()
     names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
     store.open()
@@ -476,7 +498,7 @@ def test_close_cleans_up_expired_before_lru_size_eviction(tmp_path, monkeypatch)
 
 
 def test_open_cleanup_errors_are_best_effort(tmp_path):
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, "max_age": 5}}))
     store.create()
     name, value = "data/00000000", b"abc"
     with store:
@@ -509,7 +531,7 @@ def test_open_cleanup_errors_are_best_effort(tmp_path):
 
 def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("BORGSTORE_LATENCY", "200000")
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
     store.create()
     try:
         with store:
@@ -546,7 +568,7 @@ def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypa
 def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("BORGSTORE_LATENCY", "0")
     monkeypatch.setenv("BORGSTORE_BANDWIDTH", "8")  # 1 byte/s
-    store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}})
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
     store.create()
     try:
         with store:
@@ -580,7 +602,10 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
 
 def test_public_cache_invalidate(tmp_path):
     store, _ = make_store(
-        tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}, "meta/": {"mode": CacheMode.C_WRITETHROUGH}}
+        tmp_path,
+        config=make_config(
+            {"data/": {"cache": CacheMode.C_WRITETHROUGH}, "meta/": {"cache": CacheMode.C_WRITETHROUGH}}
+        ),
     )
     store.create()
     try:

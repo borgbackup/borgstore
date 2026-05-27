@@ -15,12 +15,12 @@ from .test_backends import get_s3_test_backend, s3_is_available  # noqa
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo
 
-LEVELS_CONFIG = {"zero/": [0], "one/": [1], "two/": [2]}  # Layout used for most tests
+CONFIG = {"zero/": {"levels": [0]}, "one/": {"levels": [1]}, "two/": {"levels": [2]}}  # Layout used for most tests
 
 
 @pytest.fixture()
 def posixfs_store_created(tmp_path):
-    store = Store(backend=get_posixfs_test_backend(tmp_path), levels=LEVELS_CONFIG)
+    store = Store(backend=get_posixfs_test_backend(tmp_path), config=CONFIG)
     store.create()
     try:
         yield store
@@ -30,7 +30,7 @@ def posixfs_store_created(tmp_path):
 
 @pytest.fixture()
 def sftp_store_created():
-    store = Store(backend=get_sftp_test_backend(), levels=LEVELS_CONFIG)
+    store = Store(backend=get_sftp_test_backend(), config=CONFIG)
     store.create()
     try:
         yield store
@@ -40,7 +40,7 @@ def sftp_store_created():
 
 @pytest.fixture()
 def rclone_store_created():
-    store = Store(backend=get_rclone_test_backend(), levels=LEVELS_CONFIG)
+    store = Store(backend=get_rclone_test_backend(), config=CONFIG)
     store.create()
     try:
         yield store
@@ -50,7 +50,7 @@ def rclone_store_created():
 
 @pytest.fixture()
 def s3_store_created():
-    store = Store(backend=get_s3_test_backend(), levels=LEVELS_CONFIG)
+    store = Store(backend=get_s3_test_backend(), config=CONFIG)
     store.create()
     try:
         yield store
@@ -101,7 +101,7 @@ def test_basics(posixfs_store_created):
 
 
 def test_defrag_nested(posixfs_store_created):
-    ns = "two"  # nested! LEVELS_CONFIG has {"two/": [2]}
+    ns = "two"  # nested! CONFIG has {"two/": {"levels": [2]}}
     v1 = b"0123456789"
     v2 = b"abcdefghij"
     with posixfs_store_created as store:
@@ -415,7 +415,7 @@ def test_quota_no_quota(posixfs_store_created):
 def test_quota_with_quota(tmp_path):
     quota_limit = 1000000
     be = PosixFS(tmp_path / "store", quota=quota_limit)
-    store = Store(backend=be, levels=LEVELS_CONFIG)
+    store = Store(backend=be, config=CONFIG)
     store.create()
     try:
         with store:
