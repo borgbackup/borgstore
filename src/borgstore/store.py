@@ -267,7 +267,7 @@ class Store:
                     remaining_items = []
                     for info in items:
                         if not info.atime or (now - info.atime) > policy.max_age:
-                            self._cache_invalidate(info.name)
+                            self._cache_delete(info.name)
                         else:
                             remaining_items.append(info)
                     items = remaining_items
@@ -276,7 +276,7 @@ class Store:
                     for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
                         if total_size <= policy.size:
                             break
-                        self._cache_invalidate(info.name)
+                        self._cache_delete(info.name)
                         total_size -= info.size
             except Exception as err:
                 logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
@@ -374,7 +374,7 @@ class Store:
         st["cache_store_volume"] = st.get("cache_store_volume", 0)
         return st
 
-    def _cache_get(self, nested_name: str) -> Optional[bytes]:
+    def _cache_load(self, nested_name: str) -> Optional[bytes]:
         if self.cache_backend is None or self._cache_disabled:
             return None
         self._stats["cache_load_calls"] += 1
@@ -391,7 +391,7 @@ class Store:
         self._stats["cache_load_volume"] += len(value)
         return value
 
-    def _cache_put(self, nested_name: str, value: bytes) -> None:
+    def _cache_store(self, nested_name: str, value: bytes) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
         self._stats["cache_store_calls"] += 1
@@ -402,7 +402,7 @@ class Store:
             logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
 
-    def _cache_invalidate(self, nested_name: str) -> None:
+    def _cache_delete(self, nested_name: str) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
         self._stats["cache_delete_calls"] += 1
@@ -441,7 +441,7 @@ class Store:
             for namespace, policy in self.cache_namespaces:
                 for info in self._cache_list(namespace.rstrip("/")):
                     if not info.directory:
-                        self._cache_invalidate(info.name)
+                        self._cache_delete(info.name)
         else:
             # Check if name represents a namespace
             target_namespace = None
@@ -454,11 +454,11 @@ class Store:
                 # Invalidate all items in the namespace
                 for info in self._cache_list(target_namespace.rstrip("/")):
                     if not info.directory:
-                        self._cache_invalidate(info.name)
+                        self._cache_delete(info.name)
             else:
                 # Invalidate single item
                 nested_name = self.find(name, deleted=deleted)
-                self._cache_invalidate(nested_name)
+                self._cache_delete(nested_name)
 
     def _get_levels(self, name):
         """Get levels from the configuration depending on the namespace."""
@@ -506,17 +506,17 @@ class Store:
             cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
             if cache_policy.mode == CacheMode.C_WRITETHROUGH:
-                full_value = self._cache_get(nested_name)
+                full_value = self._cache_load(nested_name)
                 if full_value is None:
                     full_value = self._backend_call(
                         lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
                     )
-                    self._cache_put(nested_name, full_value)
+                    self._cache_store(nested_name, full_value)
             elif cache_policy.mode == CacheMode.C_MIRROR:
                 full_value = self._backend_call(
                     lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
                 )
-                self._cache_put(nested_name, full_value)
+                self._cache_store(nested_name, full_value)
             else:
                 result = self._backend_call(
                     lambda: self.backend.load(nested_name, size=size, offset=offset), key="load", volume=lambda value: len(value)
@@ -535,7 +535,7 @@ class Store:
             nested_name = self.find(name)
             self._backend_call(lambda: self.backend.store(nested_name, value), key="store", volume=len(value))
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
-                self._cache_put(nested_name, value)
+                self._cache_store(nested_name, value)
             self._stats_update_volume("store", len(value))
 
     def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
@@ -554,7 +554,7 @@ class Store:
             nested_name = self.find(name, deleted=deleted)
             self._backend_call(lambda: self.backend.delete(nested_name), key="delete", volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
-                self._cache_invalidate(nested_name)
+                self._cache_delete(nested_name)
 
     def move(
         self,
