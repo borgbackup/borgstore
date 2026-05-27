@@ -309,13 +309,17 @@ class Store:
         self._stats[f"{key}_time"] += overall_time
         logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
 
-    def _backend_call(self, operation, *, volume=0):
+    def _backend_call(self, operation, *, key=None, volume=0):
         # latency and bandwidth emulation is only applied to (primary)
         # backend calls, not to (secondary) cache backend calls.
+        if key is not None:
+            self._stats[f"backend_{key}_calls"] += 1
         start = time.perf_counter_ns()
         result = operation()
         be_needed_ns = time.perf_counter_ns() - start
         volume = volume(result) if callable(volume) else volume
+        if key is not None:
+            self._stats[f"backend_{key}_volume"] += volume
         emulated_time = self.latency + (0 if not self.bandwidth else float(volume) / self.bandwidth)
         remaining_time = emulated_time - be_needed_ns / 1e9
         if remaining_time > 0.0:
@@ -357,8 +361,13 @@ class Store:
         st["cache_errors"] = st.get("cache_errors", 0)
         st["cache_load_calls"] = st.get("cache_load_calls", 0)
         st["cache_store_calls"] = st.get("cache_store_calls", 0)
+        st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
         st["cache_load_volume"] = st.get("cache_load_volume", 0)
         st["cache_store_volume"] = st.get("cache_store_volume", 0)
+        st["backend_load_calls"] = st.get("backend_load_calls", 0)
+        st["backend_store_calls"] = st.get("backend_store_calls", 0)
+        st["backend_load_volume"] = st.get("backend_load_volume", 0)
+        st["backend_store_volume"] = st.get("backend_store_volume", 0)
         st["cache_disabled"] = self._cache_disabled
         cache_total = st["cache_hits"] + st["cache_misses"]
         st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
@@ -395,6 +404,7 @@ class Store:
     def _cache_invalidate(self, nested_name: str) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
+        self._stats["cache_delete_calls"] += 1
         try:
             self.cache_backend.delete(nested_name)
         except ObjectNotFound:
@@ -498,17 +508,17 @@ class Store:
                 full_value = self._cache_get(nested_name)
                 if full_value is None:
                     full_value = self._backend_call(
-                        lambda: self.backend.load(nested_name, size=None, offset=0), volume=lambda value: len(value)
+                        lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
                     )
                     self._cache_put(nested_name, full_value)
             elif cache_policy.mode == CacheMode.C_MIRROR:
                 full_value = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=None, offset=0), volume=lambda value: len(value)
+                    lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
                 )
                 self._cache_put(nested_name, full_value)
             else:
                 result = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=size, offset=offset), volume=lambda value: len(value)
+                    lambda: self.backend.load(nested_name, size=size, offset=offset), key="load", volume=lambda value: len(value)
                 )
                 self._stats_update_volume("load", len(result))
                 return result
@@ -522,7 +532,7 @@ class Store:
         # - write to the last level if no existing item is found.
         with self._stats_updater("store", f"store({name!r})"):
             nested_name = self.find(name)
-            self._backend_call(lambda: self.backend.store(nested_name, value), volume=len(value))
+            self._backend_call(lambda: self.backend.store(nested_name, value), key="store", volume=len(value))
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_put(nested_name, value)
             self._stats_update_volume("store", len(value))

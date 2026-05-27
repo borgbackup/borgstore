@@ -271,8 +271,6 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
 
             monkeypatch.setattr("borgstore.store.time.time", fake_time)
             original_info = store.cache_backend.info
-            cache_deletes = {"count": 0}
-            original_cache_delete = store.cache_backend.delete
 
             def wrapped_info(backend_name):
                 info = original_info(backend_name)
@@ -281,13 +279,6 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
                 return info
 
             store.cache_backend.info = wrapped_info
-
-            def wrapped_cache_delete(backend_name):
-                if backend_name == nested_name:
-                    cache_deletes["count"] += 1
-                return original_cache_delete(backend_name)
-
-            store.cache_backend.delete = wrapped_cache_delete
 
             try:
                 assert store.load(name) == value  # miss, populate cache at t=1000
@@ -298,13 +289,12 @@ def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
                 assert store.load(name) == value  # still hit (lazy/no read-time expiration)
             finally:
                 store.cache_backend.info = original_info
-                store.cache_backend.delete = original_cache_delete
 
-            assert cache_deletes["count"] == 0  # no deletes during load/read
             stats = store.stats
             assert stats["cache_misses"] == 1
             assert stats["cache_hits"] == 2
             assert stats["cache_load_calls"] == 3
+            assert stats["cache_delete_calls"] == 1
     finally:
         store.destroy()
 
@@ -538,13 +528,6 @@ def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypa
 
             store.cache_invalidate(name)
 
-            original_primary_load = store.backend.load
-            primary_calls = {"count": 0}
-
-            def wrapped_primary_load(backend_name, size=None, offset=0):
-                primary_calls["count"] += 1
-                return original_primary_load(backend_name, size=size, offset=offset)
-
             sleep_calls = []
             original_sleep = store_module.time.sleep
 
@@ -552,19 +535,19 @@ def test_latency_emulation_not_applied_to_cache_backend_calls(tmp_path, monkeypa
                 sleep_calls.append(seconds)
 
             monkeypatch.setattr("borgstore.store.time.sleep", wrapped_sleep)
-            store.backend.load = wrapped_primary_load
             try:
                 assert store.load(name) == value
-                assert primary_calls["count"] == 1
+                stats = store.stats
+                assert stats["backend_load_calls"] == 1
                 sleeps_after_miss = len(sleep_calls)
                 assert sleeps_after_miss >= 1
 
                 assert store.load(name) == value
-                assert primary_calls["count"] == 1
+                stats = store.stats
+                assert stats["backend_load_calls"] == 1
                 # cache hit: no primary backend calls at all, so no new sleeps
                 assert len(sleep_calls) == sleeps_after_miss
             finally:
-                store.backend.load = original_primary_load
                 monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
     finally:
         store.destroy()
@@ -581,13 +564,6 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
             store.store(name, value)
             store.cache_invalidate(name)
 
-            primary_calls = {"count": 0}
-            original_primary_load = store.backend.load
-
-            def wrapped_primary_load(backend_name, size=None, offset=0):
-                primary_calls["count"] += 1
-                return original_primary_load(backend_name, size=size, offset=offset)
-
             sleep_calls = []
             original_sleep = store_module.time.sleep
 
@@ -595,18 +571,18 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
                 sleep_calls.append(seconds)
 
             monkeypatch.setattr("borgstore.store.time.sleep", wrapped_sleep)
-            store.backend.load = wrapped_primary_load
             try:
                 assert store.load(name) == value
-                assert primary_calls["count"] == 1
+                stats = store.stats
+                assert stats["backend_load_calls"] == 1
                 sleeps_after_miss = len(sleep_calls)
                 assert any(seconds >= 2.9 for seconds in sleep_calls)
 
                 assert store.load(name) == value
-                assert primary_calls["count"] == 1
+                stats = store.stats
+                assert stats["backend_load_calls"] == 1
                 assert len(sleep_calls) == sleeps_after_miss
             finally:
-                store.backend.load = original_primary_load
                 monkeypatch.setattr("borgstore.store.time.sleep", original_sleep)
     finally:
         store.destroy()

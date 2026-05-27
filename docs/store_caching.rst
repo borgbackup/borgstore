@@ -120,5 +120,10 @@ Statistics
 - ``cache_store_volume``
 - ``cache_load_calls``
 - ``cache_store_calls``
+- ``cache_delete_calls``
+- ``backend_load_calls``
+- ``backend_store_calls``
+- ``backend_load_volume``
+- ``backend_store_volume``
 - ``cache_hit_ratio``
 - ``cache_disabled``
