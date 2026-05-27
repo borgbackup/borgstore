@@ -376,8 +376,10 @@ def test_cache_stats(tmp_path):
             stats = store.stats
             assert stats["cache_hits"] == 2
             assert stats["cache_misses"] == 0
-            assert stats["cache_bytes_read"] == 6
-            assert stats["cache_bytes_written"] == 9
+            assert stats["cache_load_calls"] == 2
+            assert stats["cache_store_calls"] == 3
+            assert stats["cache_load_volume"] == 6
+            assert stats["cache_store_volume"] == 9
             assert stats["cache_disabled"] is False
             assert stats["cache_hit_ratio"] == 1.0
     finally:

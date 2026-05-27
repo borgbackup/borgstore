@@ -2,7 +2,7 @@ Store caching
 =============
 
 The ``Store`` can optionally use a second backend as a local cache for selected
-namespaces, which is especially useful when the primary backend is remote
+namespaces, which is especially useful when the primary backend is remote,
 slower or otherwise more "expensive" than the cache.
 
 Configuration
@@ -116,7 +116,9 @@ Statistics
 - ``cache_hits``
 - ``cache_misses``
 - ``cache_errors``
-- ``cache_bytes_read``
-- ``cache_bytes_written``
+- ``cache_load_volume``
+- ``cache_store_volume``
+- ``cache_load_calls``
+- ``cache_store_calls``
 - ``cache_hit_ratio``
 - ``cache_disabled``

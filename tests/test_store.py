@@ -389,6 +389,13 @@ def test_stats(posixfs_store_created):
         store.load(key)
         assert store._stats["load_volume"] == 200
 
+        # Assert default values for cache stats when cache is disabled
+        stats = store.stats
+        assert stats["cache_load_calls"] == 0
+        assert stats["cache_store_calls"] == 0
+        assert stats["cache_load_volume"] == 0
+        assert stats["cache_store_volume"] == 0
+
 
 def test_quota_no_quota(posixfs_store_created):
     with posixfs_store_created as store:

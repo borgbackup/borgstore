@@ -355,8 +355,10 @@ class Store:
         st["cache_hits"] = st.get("cache_hits", 0)
         st["cache_misses"] = st.get("cache_misses", 0)
         st["cache_errors"] = st.get("cache_errors", 0)
-        st["cache_bytes_read"] = st.get("cache_bytes_read", 0)
-        st["cache_bytes_written"] = st.get("cache_bytes_written", 0)
+        st["cache_load_calls"] = st.get("cache_load_calls", 0)
+        st["cache_store_calls"] = st.get("cache_store_calls", 0)
+        st["cache_load_volume"] = st.get("cache_load_volume", 0)
+        st["cache_store_volume"] = st.get("cache_store_volume", 0)
         st["cache_disabled"] = self._cache_disabled
         cache_total = st["cache_hits"] + st["cache_misses"]
         st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
@@ -365,6 +367,7 @@ class Store:
     def _cache_get(self, nested_name: str) -> Optional[bytes]:
         if self.cache_backend is None or self._cache_disabled:
             return None
+        self._stats["cache_load_calls"] += 1
         try:
             value = self.cache_backend.load(nested_name)
         except ObjectNotFound:
@@ -375,15 +378,16 @@ class Store:
             self._stats["cache_errors"] += 1
             return None
         self._stats["cache_hits"] += 1
-        self._stats["cache_bytes_read"] += len(value)
+        self._stats["cache_load_volume"] += len(value)
         return value
 
     def _cache_put(self, nested_name: str, value: bytes) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
+        self._stats["cache_store_calls"] += 1
         try:
             self.cache_backend.store(nested_name, value)
-            self._stats["cache_bytes_written"] += len(value)
+            self._stats["cache_store_volume"] += len(value)
         except Exception as err:
             logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
