@@ -245,43 +245,6 @@ class Store:
             else:
                 self._cache_cleanup_expired()
 
-    def _cache_list(self, name: str) -> Iterator[ItemInfo]:
-        if self.cache_backend is None:
-            return
-        for info in self.cache_backend.list(name):
-            if info.directory:
-                subdir_name = (name + "/" + info.name) if name else info.name
-                yield from self._cache_list(subdir_name)
-            else:
-                full_name = (name + "/" + info.name) if name else info.name
-                yield info._replace(name=full_name)
-
-    def _cache_cleanup_expired(self) -> None:
-        now = time.time()
-        for namespace, policy in self.cache_namespaces:
-            if policy.max_age is None and policy.size is None:
-                continue
-            try:
-                items = [info for info in self._cache_list(namespace.rstrip("/")) if not info.directory]
-                if policy.max_age is not None:
-                    remaining_items = []
-                    for info in items:
-                        if not info.atime or (now - info.atime) > policy.max_age:
-                            self._cache_delete(info.name)
-                        else:
-                            remaining_items.append(info)
-                    items = remaining_items
-                if policy.size is not None:
-                    total_size = sum(info.size for info in items)
-                    for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
-                        if total_size <= policy.size:
-                            break
-                        self._cache_delete(info.name)
-                        total_size -= info.size
-            except Exception as err:
-                logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
-                self._stats["cache_errors"] += 1
-
     def close(self) -> None:
         self.backend.close()
         if self.cache_backend is not None:
@@ -374,92 +337,6 @@ class Store:
         st["cache_store_volume"] = st.get("cache_store_volume", 0)
         return st
 
-    def _cache_load(self, nested_name: str) -> Optional[bytes]:
-        if self.cache_backend is None or self._cache_disabled:
-            return None
-        self._stats["cache_load_calls"] += 1
-        try:
-            value = self.cache_backend.load(nested_name)
-        except ObjectNotFound:
-            self._stats["cache_misses"] += 1
-            return None
-        except Exception as err:
-            logger.warning(f"borgstore: cache load failed for {nested_name!r}: {err!r}")
-            self._stats["cache_errors"] += 1
-            return None
-        self._stats["cache_hits"] += 1
-        self._stats["cache_load_volume"] += len(value)
-        return value
-
-    def _cache_store(self, nested_name: str, value: bytes) -> None:
-        if self.cache_backend is None or self._cache_disabled:
-            return
-        self._stats["cache_store_calls"] += 1
-        try:
-            self.cache_backend.store(nested_name, value)
-            self._stats["cache_store_volume"] += len(value)
-        except Exception as err:
-            logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
-            self._stats["cache_errors"] += 1
-
-    def _cache_delete(self, nested_name: str) -> None:
-        if self.cache_backend is None or self._cache_disabled:
-            return
-        self._stats["cache_delete_calls"] += 1
-        try:
-            self.cache_backend.delete(nested_name)
-        except ObjectNotFound:
-            pass
-        except Exception as err:
-            logger.warning(f"borgstore: cache delete failed for {nested_name!r}: {err!r}")
-            self._stats["cache_errors"] += 1
-
-    def _cache_move(self, old_nested: str, new_nested: str) -> None:
-        if self.cache_backend is None or self._cache_disabled:
-            return
-        try:
-            self.cache_backend.move(old_nested, new_nested)
-        except ObjectNotFound:
-            pass
-        except Exception as err:
-            logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
-            self._stats["cache_errors"] += 1
-
-    def cache_invalidate(self, name: str, *, deleted: bool = False) -> None:
-        """
-        Invalidate cached items.
-
-        - If name is ROOTNS (""), invalidate caches of all cached namespaces.
-        - If a namespace is given, invalidate all items in that namespace.
-        - If an item name is given, invalidate only that single item.
-        """
-        if self.cache_backend is None or self._cache_disabled:
-            return
-
-        if name == ROOTNS:
-            # Root / all namespaces
-            for namespace, policy in self.cache_namespaces:
-                for info in self._cache_list(namespace.rstrip("/")):
-                    if not info.directory:
-                        self._cache_delete(info.name)
-        else:
-            # Check if name represents a namespace
-            target_namespace = None
-            for namespace, policy in self.cache_namespaces:
-                if namespace.rstrip("/") == name.rstrip("/"):
-                    target_namespace = namespace
-                    break
-
-            if target_namespace is not None:
-                # Invalidate all items in the namespace
-                for info in self._cache_list(target_namespace.rstrip("/")):
-                    if not info.directory:
-                        self._cache_delete(info.name)
-            else:
-                # Invalidate single item
-                nested_name = self.find(name, deleted=deleted)
-                self._cache_delete(nested_name)
-
     def _get_levels(self, name):
         """Get levels from the configuration depending on the namespace."""
         for namespace, levels in self.levels:
@@ -501,6 +378,23 @@ class Store:
         with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
             return self._backend_call(lambda: self.backend.info(self.find(name, deleted=deleted)), volume=0)
 
+    def _cache_load(self, nested_name: str) -> Optional[bytes]:
+        if self.cache_backend is None or self._cache_disabled:
+            return None
+        self._stats["cache_load_calls"] += 1
+        try:
+            value = self.cache_backend.load(nested_name)
+        except ObjectNotFound:
+            self._stats["cache_misses"] += 1
+            return None
+        except Exception as err:
+            logger.warning(f"borgstore: cache load failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
+            return None
+        self._stats["cache_hits"] += 1
+        self._stats["cache_load_volume"] += len(value)
+        return value
+
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
@@ -509,23 +403,40 @@ class Store:
                 full_value = self._cache_load(nested_name)
                 if full_value is None:
                     full_value = self._backend_call(
-                        lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
+                        lambda: self.backend.load(nested_name, size=None, offset=0),
+                        key="load",
+                        volume=lambda value: len(value),
                     )
                     self._cache_store(nested_name, full_value)
             elif cache_policy.mode == CacheMode.C_MIRROR:
                 full_value = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
+                    lambda: self.backend.load(nested_name, size=None, offset=0),
+                    key="load",
+                    volume=lambda value: len(value),
                 )
                 self._cache_store(nested_name, full_value)
             else:
                 result = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=size, offset=offset), key="load", volume=lambda value: len(value)
+                    lambda: self.backend.load(nested_name, size=size, offset=offset),
+                    key="load",
+                    volume=lambda value: len(value),
                 )
                 self._stats_update_volume("load", len(result))
                 return result
             result = full_value[offset : (None if size is None else offset + size)]
             self._stats_update_volume("load", len(result))
             return result
+
+    def _cache_store(self, nested_name: str, value: bytes) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        self._stats["cache_store_calls"] += 1
+        try:
+            self.cache_backend.store(nested_name, value)
+            self._stats["cache_store_volume"] += len(value)
+        except Exception as err:
+            logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def store(self, name: str, value: bytes) -> None:
         # note: using .find here will:
@@ -538,11 +449,17 @@ class Store:
                 self._cache_store(nested_name, value)
             self._stats_update_volume("store", len(value))
 
-    def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
-        with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
-            return self._backend_call(
-                lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
-            )
+    def _cache_delete(self, nested_name: str) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        self._stats["cache_delete_calls"] += 1
+        try:
+            self.cache_backend.delete(nested_name)
+        except ObjectNotFound:
+            pass
+        except Exception as err:
+            logger.warning(f"borgstore: cache delete failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def delete(self, name: str, *, deleted=False) -> None:
         """
@@ -555,6 +472,52 @@ class Store:
             self._backend_call(lambda: self.backend.delete(nested_name), key="delete", volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_delete(nested_name)
+
+    def cache_invalidate(self, name: str, *, deleted: bool = False) -> None:
+        """
+        Invalidate cached items.
+
+        - If name is ROOTNS (""), invalidate caches of all cached namespaces.
+        - If a namespace is given, invalidate all items in that namespace.
+        - If an item name is given, invalidate only that single item.
+        """
+        if self.cache_backend is None or self._cache_disabled:
+            return
+
+        if name == ROOTNS:
+            # Root / all namespaces
+            for namespace, policy in self.cache_namespaces:
+                for info in self._cache_list(namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_delete(info.name)
+        else:
+            # Check if name represents a namespace
+            target_namespace = None
+            for namespace, policy in self.cache_namespaces:
+                if namespace.rstrip("/") == name.rstrip("/"):
+                    target_namespace = namespace
+                    break
+
+            if target_namespace is not None:
+                # Invalidate all items in the namespace
+                for info in self._cache_list(target_namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_delete(info.name)
+            else:
+                # Invalidate single item
+                nested_name = self.find(name, deleted=deleted)
+                self._cache_delete(nested_name)
+
+    def _cache_move(self, old_nested: str, new_nested: str) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        try:
+            self.cache_backend.move(old_nested, new_nested)
+        except ObjectNotFound:
+            pass
+        except Exception as err:
+            logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def move(
         self,
@@ -594,36 +557,16 @@ class Store:
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_move(nested_name, nested_new_name)
 
-    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
-        """
-        efficiently create a new item (target) by combining blocks from existing items (sources)
-        in the same namespace. item and target names are always without namespace.
-
-        sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
-        in order of appearance in the list and their contents will be appended to the target item.
-
-        if the target name is not given, algorithm must be given to compute the target name
-        as hash(algorithm, target_content).hexdigest().
-
-        returns the target name.
-        """
-        prefix = (namespace + "/") if namespace else ""
-        mapped_sources = [
-            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
-        ]
-        if target is not None:
-            target = self.find(prefix + target, deleted=deleted)
-
-        # Note: defrag does not interact with the cache. It creates a new item from
-        # the chunks of the source items we want to keep. It does not delete the source
-        # items; that is the task of the caller after defrag successfully returns the new
-        # item name. If the caller subsequently deletes the source items, they will be
-        # removed from the cache.
-        levels = self._get_levels(prefix)[-1] if prefix else 0
-        backend_target = self.backend.defrag(
-            mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
-        )
-        return unnest(backend_target, namespace=prefix).removeprefix(prefix)
+    def _cache_list(self, name: str) -> Iterator[ItemInfo]:
+        if self.cache_backend is None:
+            return
+        for info in self.cache_backend.list(name):
+            if info.directory:
+                subdir_name = (name + "/" + info.name) if name else info.name
+                yield from self._cache_list(subdir_name)
+            else:
+                full_name = (name + "/" + info.name) if name else info.name
+                yield info._replace(name=full_name)
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         """
@@ -682,3 +625,66 @@ class Store:
                     yield info._replace(name=info.name.removesuffix(DEL_SUFFIX))
                 elif not deleted and not is_deleted:
                     yield info
+
+    def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
+        with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
+            return self._backend_call(
+                lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
+            )
+
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
+        """
+        efficiently create a new item (target) by combining blocks from existing items (sources)
+        in the same namespace. item and target names are always without namespace.
+
+        sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
+        in order of appearance in the list and their contents will be appended to the target item.
+
+        if the target name is not given, algorithm must be given to compute the target name
+        as hash(algorithm, target_content).hexdigest().
+
+        returns the target name.
+        """
+        prefix = (namespace + "/") if namespace else ""
+        mapped_sources = [
+            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
+        ]
+        if target is not None:
+            target = self.find(prefix + target, deleted=deleted)
+
+        # Note: defrag does not interact with the cache. It creates a new item from
+        # the chunks of the source items we want to keep. It does not delete the source
+        # items; that is the task of the caller after defrag successfully returns the new
+        # item name. If the caller subsequently deletes the source items, they will be
+        # removed from the cache.
+        levels = self._get_levels(prefix)[-1] if prefix else 0
+        backend_target = self.backend.defrag(
+            mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
+        )
+        return unnest(backend_target, namespace=prefix).removeprefix(prefix)
+
+    def _cache_cleanup_expired(self) -> None:
+        now = time.time()
+        for namespace, policy in self.cache_namespaces:
+            if policy.max_age is None and policy.size is None:
+                continue
+            try:
+                items = [info for info in self._cache_list(namespace.rstrip("/")) if not info.directory]
+                if policy.max_age is not None:
+                    remaining_items = []
+                    for info in items:
+                        if not info.atime or (now - info.atime) > policy.max_age:
+                            self._cache_delete(info.name)
+                        else:
+                            remaining_items.append(info)
+                    items = remaining_items
+                if policy.size is not None:
+                    total_size = sum(info.size for info in items)
+                    for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
+                        if total_size <= policy.size:
+                            break
+                        self._cache_delete(info.name)
+                        total_size -= info.size
+            except Exception as err:
+                logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
+                self._stats["cache_errors"] += 1
