@@ -6,6 +6,8 @@ basic operations.
 
 Existing backends are listed below; more might come in the future.
 
+See also :doc:`store_caching` for optional Store-level caching with a secondary backend.
+
 posixfs
 -------
 
@@ -79,6 +81,20 @@ Use storage on a local POSIX filesystem:
       store.open()
       # ...
       store.close()
+
+Note:
+
+When using posixfs as a caching backend, it needs to use a filesystem with
+``atime`` support for ``max_age`` and LRU-based ``size`` limits to work as
+expected.
+
+For Linux that means you must not use ``noatime`` mount option.
+
+For Windows / NTFS, atime is disabled by default and you need:
+
+::
+
+    fsutil behavior set DisableLastAccess 0   # re-enable (requires admin, reboot)
 
 sftp
 ----

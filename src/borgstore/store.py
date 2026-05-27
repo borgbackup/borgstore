@@ -12,10 +12,11 @@ The Store uses a backend to store key/value data and adds some functionality:
 from binascii import hexlify
 from collections import Counter
 from contextlib import contextmanager
+import enum
 import logging
 import os
 import time
-from typing import Iterator, Optional
+from typing import Iterator, NamedTuple, Optional
 
 from .utils.nesting import nest, unnest
 from .backends._base import ItemInfo, BackendBase
@@ -25,9 +26,32 @@ from .backends.rclone import get_rclone_backend
 from .backends.sftp import get_sftp_backend
 from .backends.s3 import get_s3_backend
 from .backends.rest import get_rest_backend
-from .constants import DEL_SUFFIX
+from .constants import DEL_SUFFIX, ROOTNS
 
 logger = logging.getLogger(__name__)
+
+
+class CacheMode(enum.Enum):
+    C_OFF = "off"
+    C_MIRROR = "mirror"
+    C_WRITETHROUGH = "writethrough"
+
+    @classmethod
+    def from_str(cls, value):
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value.lower())
+            except ValueError as err:
+                raise ValueError(f"unknown CacheMode: {value!r}") from err
+        raise ValueError(f"unknown CacheMode: {value!r}")
+
+
+class CachePolicy(NamedTuple):
+    mode: CacheMode
+    max_age: Optional[float]
+    size: Optional[int]
 
 
 def get_backend(url, permissions=None, quota=None):
@@ -66,6 +90,10 @@ class Store:
         backend: Optional[BackendBase] = None,
         levels: Optional[dict] = None,
         permissions: Optional[dict] = None,
+        *,
+        cache: Optional[dict[str, CachePolicy | dict]] = None,
+        cache_url: Optional[str] = None,
+        cache_backend: Optional[BackendBase] = None,
     ):
         self.url = url
         if backend is None and url is not None:
@@ -76,6 +104,33 @@ class Store:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
         self.set_levels(levels)
+        if cache_url is not None and cache_backend is not None:
+            raise ValueError("Only one of cache_url and cache_backend can be given.")
+        cache = cache or {}
+        if not isinstance(cache, dict):
+            raise ValueError("Invalid cache configuration: expected a dict mapping namespace to policy.")
+        cache_policies = {namespace: self._normalize_cache_policy(policy) for namespace, policy in cache.items()}
+        configured_namespaces = {namespace for namespace, _ in self.levels}
+        for namespace, policy in cache_policies.items():
+            if policy.mode != CacheMode.C_OFF and namespace not in configured_namespaces:
+                raise ValueError(f"Invalid cache namespace configuration: {namespace!r} not in levels.")
+        have_cache_enabled_namespaces = any(policy.mode != CacheMode.C_OFF for policy in cache_policies.values())
+        if have_cache_enabled_namespaces and cache_url is None and cache_backend is None:
+            raise ValueError("cache_url or cache_backend is required for cache modes other than C_OFF.")
+        self.cache_backend = cache_backend if cache_backend is not None else None
+        if self.cache_backend is None and cache_url is not None:
+            self.cache_backend = get_backend(cache_url)
+            if self.cache_backend is None:
+                raise BackendURLInvalid(f"Invalid or unsupported Cache Backend URL: {cache_url}")
+        self._cache_disabled = False
+        self.cache_namespaces = [
+            entry
+            for entry in sorted(
+                ((namespace, policy) for namespace, policy in cache_policies.items() if policy.mode != CacheMode.C_OFF),
+                key=lambda item: len(item[0]),
+                reverse=True,
+            )
+        ]
         self._stats: Counter = Counter()
         # this is to emulate additional latency to what the backend actually offers:
         self.latency = float(os.environ.get("BORGSTORE_LATENCY", "0")) / 1e6  # [us] -> [s]
@@ -83,7 +138,41 @@ class Store:
         self.bandwidth = float(os.environ.get("BORGSTORE_BANDWIDTH", "0")) / 8  # [bits/s] -> [bytes/s]
 
     def __repr__(self):
+        if self.cache_backend is not None or self.cache_namespaces:
+            cache_backend = self.cache_backend.__class__.__name__ if self.cache_backend is not None else None
+            return (
+                f"<Store(url={self.url!r}, levels={self.levels!r}, "
+                f"cache_namespaces={self.cache_namespaces!r}, cache_backend={cache_backend!r})>"
+            )
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
+
+    @staticmethod
+    def _normalize_cache_policy(policy: CachePolicy | dict) -> CachePolicy:
+        if isinstance(policy, CachePolicy):
+            return policy
+        if isinstance(policy, dict):
+            unknown_keys = set(policy) - {"mode", "max_age", "size"}
+            if unknown_keys:
+                raise ValueError(f"Invalid cache policy keys: {sorted(unknown_keys)!r}")
+            if "mode" not in policy:
+                raise ValueError("Invalid cache policy: 'mode' is required.")
+            mode = CacheMode.from_str(policy["mode"])
+            max_age = policy.get("max_age")
+            if max_age is not None:
+                if not isinstance(max_age, (int, float)) or max_age < 0:
+                    raise ValueError(f"Invalid cache max_age value: {max_age!r}")
+                max_age = float(max_age)
+            size = policy.get("size")
+            if size is not None and (not isinstance(size, int) or size < 0):
+                raise ValueError(f"Invalid cache size value: {size!r}")
+            return CachePolicy(mode=mode, max_age=max_age, size=size)
+        raise ValueError("Invalid cache policy: expected dict or CachePolicy.")
+
+    def _cache_policy_for(self, name: str) -> CachePolicy:
+        for namespace, policy in self.cache_namespaces:
+            if name.startswith(namespace):
+                return policy
+        return CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
 
     def set_levels(self, levels: dict, create: bool = False) -> None:
         if not levels or not isinstance(levels, dict):
@@ -101,9 +190,16 @@ class Store:
             for namespace, levels in self.levels:
                 namespace = namespace.rstrip("/")
                 level = max(levels)
+                cache_enabled = (
+                    self.cache_backend is not None
+                    and not self._cache_disabled
+                    and self._cache_policy_for(f"{namespace}/").mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}
+                )
                 if level == 0:
                     # flat, we just need to create the namespace directory:
                     self.backend.mkdir(namespace)
+                    if cache_enabled:
+                        self.cache_backend.mkdir(namespace)
                 elif level > 0:
                     # nested, we only need to create the deepest nesting dir layer,
                     # any missing parent dirs will be created as needed by backend.mkdir.
@@ -113,16 +209,22 @@ class Store:
                         name = f"{namespace}/{dir}" if namespace else dir
                         nested_name = nest(name, level)
                         self.backend.mkdir(nested_name[: -2 * level - 1])
+                        if cache_enabled:
+                            self.cache_backend.mkdir(nested_name[: -2 * level - 1])
                 else:
                     raise ValueError(f"Invalid levels: {namespace}: {levels}")
 
     def create(self) -> None:
         self.backend.create()
+        if self.cache_backend is not None and not self._cache_disabled:
+            self.cache_backend.create()
         if self.backend.precreate_dirs:
             self.create_levels()
 
     def destroy(self) -> None:
         self.backend.destroy()
+        if self.cache_backend is not None:
+            self.cache_backend.destroy()
 
     def __enter__(self):
         self.open()
@@ -134,32 +236,58 @@ class Store:
 
     def open(self) -> None:
         self.backend.open()
+        if self.cache_backend is not None and not self._cache_disabled:
+            try:
+                self.cache_backend.open()
+            except Exception as err:
+                logger.warning(f"borgstore: cache open failed, disabling cache: {err!r}")
+                self._cache_disabled = True
+            else:
+                self._cache_cleanup_expired()
 
     def close(self) -> None:
         self.backend.close()
+        if self.cache_backend is not None:
+            if not self._cache_disabled:
+                self._cache_cleanup_expired()
+            try:
+                self.cache_backend.close()
+            except Exception as err:
+                logger.warning(f"borgstore: cache close failed: {err!r}")
 
     def quota(self) -> dict:
         return self.backend.quota()
 
     @contextmanager
     def _stats_updater(self, key, msg):
-        """update call counters and overall times, also emulate latency and bandwidth"""
+        """update call counters and overall times"""
         # do not use this in generators!
         volume_before = self._stats_get_volume(key)
         start = time.perf_counter_ns()
         yield
+        end = time.perf_counter_ns()
+        overall_time = end - start
+        volume = self._stats_get_volume(key) - volume_before
+        self._stats[f"{key}_calls"] += 1
+        self._stats[f"{key}_time"] += overall_time
+        logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
+
+    def _backend_call(self, operation, *, key=None, volume=0):
+        # latency and bandwidth emulation is only applied to (primary)
+        # backend calls, not to (secondary) cache backend calls.
+        if key is not None:
+            self._stats[f"backend_{key}_calls"] += 1
+        start = time.perf_counter_ns()
+        result = operation()
         be_needed_ns = time.perf_counter_ns() - start
-        volume_after = self._stats_get_volume(key)
-        volume = volume_after - volume_before
+        volume = volume(result) if callable(volume) else volume
+        if key is not None:
+            self._stats[f"backend_{key}_volume"] += volume
         emulated_time = self.latency + (0 if not self.bandwidth else float(volume) / self.bandwidth)
         remaining_time = emulated_time - be_needed_ns / 1e9
         if remaining_time > 0.0:
             time.sleep(remaining_time)
-        end = time.perf_counter_ns()
-        overall_time = end - start
-        self._stats[f"{key}_calls"] += 1
-        self._stats[f"{key}_time"] += overall_time
-        logger.debug(f"borgstore: {msg} -> {volume}B in {overall_time / 1e6:0.1f}ms")
+        return result
 
     def _stats_update_volume(self, key, amount):
         self._stats[f"{key}_volume"] += amount
@@ -190,7 +318,23 @@ class Store:
         for key in "load", "store":
             v = st.get(f"{key}_volume", 0)
             t = st.get(f"{key}_time", 0)
-            st[f"{key}_throughput"] = v / t
+            st[f"{key}_throughput"] = v / t if t else 0
+        st["backend_load_calls"] = st.get("backend_load_calls", 0)
+        st["backend_store_calls"] = st.get("backend_store_calls", 0)
+        st["backend_delete_calls"] = st.get("backend_delete_calls", 0)
+        st["backend_load_volume"] = st.get("backend_load_volume", 0)
+        st["backend_store_volume"] = st.get("backend_store_volume", 0)
+        st["cache_disabled"] = self._cache_disabled
+        st["cache_hits"] = st.get("cache_hits", 0)
+        st["cache_misses"] = st.get("cache_misses", 0)
+        cache_total = st["cache_hits"] + st["cache_misses"]
+        st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
+        st["cache_errors"] = st.get("cache_errors", 0)
+        st["cache_load_calls"] = st.get("cache_load_calls", 0)
+        st["cache_store_calls"] = st.get("cache_store_calls", 0)
+        st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
+        st["cache_load_volume"] = st.get("cache_load_volume", 0)
+        st["cache_store_volume"] = st.get("cache_store_volume", 0)
         return st
 
     def _get_levels(self, name):
@@ -214,34 +358,108 @@ class Store:
         """
         nested_name = None
         suffix = DEL_SUFFIX if deleted else None
-        for level in self._get_levels(name):
-            nested_name = nest(name, level, add_suffix=suffix)
-            info = self.backend.info(nested_name)
-            if info.exists:
-                break
+        levels = self._get_levels(name)
+        if len(levels) == 1:
+            # optimize the usual case:
+            # the store is operating this namespace at a single specific level,
+            # thus the item must be at that level, we do not need to search it.
+            nested_name = nest(name, levels[0], add_suffix=suffix)
+        else:
+            # looks like the store is upgrading/downgrading levels,
+            # items could be at old or new levels.
+            for level in levels:
+                nested_name = nest(name, level, add_suffix=suffix)
+                info = self.backend.info(nested_name)
+                if info.exists:
+                    break
         return nested_name
 
     def info(self, name: str, *, deleted=False) -> ItemInfo:
         with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
-            return self.backend.info(self.find(name, deleted=deleted))
+            return self._backend_call(lambda: self.backend.info(self.find(name, deleted=deleted)), volume=0)
+
+    def _cache_load(self, nested_name: str) -> Optional[bytes]:
+        if self.cache_backend is None or self._cache_disabled:
+            return None
+        self._stats["cache_load_calls"] += 1
+        try:
+            value = self.cache_backend.load(nested_name)
+        except ObjectNotFound:
+            self._stats["cache_misses"] += 1
+            return None
+        except Exception as err:
+            logger.warning(f"borgstore: cache load failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
+            return None
+        self._stats["cache_hits"] += 1
+        self._stats["cache_load_volume"] += len(value)
+        return value
 
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
-            result = self.backend.load(self.find(name, deleted=deleted), size=size, offset=offset)
+            cache_policy = self._cache_policy_for(name)
+            nested_name = self.find(name, deleted=deleted)
+            if cache_policy.mode == CacheMode.C_WRITETHROUGH:
+                full_value = self._cache_load(nested_name)
+                if full_value is None:
+                    full_value = self._backend_call(
+                        lambda: self.backend.load(nested_name, size=None, offset=0),
+                        key="load",
+                        volume=lambda value: len(value),
+                    )
+                    self._cache_store(nested_name, full_value)
+            elif cache_policy.mode == CacheMode.C_MIRROR:
+                full_value = self._backend_call(
+                    lambda: self.backend.load(nested_name, size=None, offset=0),
+                    key="load",
+                    volume=lambda value: len(value),
+                )
+                self._cache_store(nested_name, full_value)
+            else:
+                result = self._backend_call(
+                    lambda: self.backend.load(nested_name, size=size, offset=offset),
+                    key="load",
+                    volume=lambda value: len(value),
+                )
+                self._stats_update_volume("load", len(result))
+                return result
+            result = full_value[offset : (None if size is None else offset + size)]
             self._stats_update_volume("load", len(result))
             return result
+
+    def _cache_store(self, nested_name: str, value: bytes) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        self._stats["cache_store_calls"] += 1
+        try:
+            self.cache_backend.store(nested_name, value)
+            self._stats["cache_store_volume"] += len(value)
+        except Exception as err:
+            logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def store(self, name: str, value: bytes) -> None:
         # note: using .find here will:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
         with self._stats_updater("store", f"store({name!r})"):
-            self.backend.store(self.find(name), value)
+            nested_name = self.find(name)
+            self._backend_call(lambda: self.backend.store(nested_name, value), key="store", volume=len(value))
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                self._cache_store(nested_name, value)
             self._stats_update_volume("store", len(value))
 
-    def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
-        with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
-            return self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm)
+    def _cache_delete(self, nested_name: str) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        self._stats["cache_delete_calls"] += 1
+        try:
+            self.cache_backend.delete(nested_name)
+        except ObjectNotFound:
+            pass
+        except Exception as err:
+            logger.warning(f"borgstore: cache delete failed for {nested_name!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def delete(self, name: str, *, deleted=False) -> None:
         """
@@ -250,7 +468,56 @@ class Store:
         See also .move(name, delete=True) for "soft" deletion.
         """
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
-            self.backend.delete(self.find(name, deleted=deleted))
+            nested_name = self.find(name, deleted=deleted)
+            self._backend_call(lambda: self.backend.delete(nested_name), key="delete", volume=0)
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                self._cache_delete(nested_name)
+
+    def cache_invalidate(self, name: str, *, deleted: bool = False) -> None:
+        """
+        Invalidate cached items.
+
+        - If name is ROOTNS (""), invalidate caches of all cached namespaces.
+        - If a namespace is given, invalidate all items in that namespace.
+        - If an item name is given, invalidate only that single item.
+        """
+        if self.cache_backend is None or self._cache_disabled:
+            return
+
+        if name == ROOTNS:
+            # Root / all namespaces
+            for namespace, policy in self.cache_namespaces:
+                for info in self._cache_list(namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_delete(info.name)
+        else:
+            # Check if name represents a namespace
+            target_namespace = None
+            for namespace, policy in self.cache_namespaces:
+                if namespace.rstrip("/") == name.rstrip("/"):
+                    target_namespace = namespace
+                    break
+
+            if target_namespace is not None:
+                # Invalidate all items in the namespace
+                for info in self._cache_list(target_namespace.rstrip("/")):
+                    if not info.directory:
+                        self._cache_delete(info.name)
+            else:
+                # Invalidate single item
+                nested_name = self.find(name, deleted=deleted)
+                self._cache_delete(nested_name)
+
+    def _cache_move(self, old_nested: str, new_nested: str) -> None:
+        if self.cache_backend is None or self._cache_disabled:
+            return
+        try:
+            self.cache_backend.move(old_nested, new_nested)
+        except ObjectNotFound:
+            pass
+        except Exception as err:
+            logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
+            self._stats["cache_errors"] += 1
 
     def move(
         self,
@@ -286,33 +553,20 @@ class Store:
             nested_new_name = self.find(new_name, deleted=deleted)
             msg = f"rename({name!r}, {new_name!r}, deleted={deleted})"
         with self._stats_updater("move", msg + f" [{nested_name!r}, {nested_new_name!r}]"):
-            self.backend.move(nested_name, nested_new_name)
+            self._backend_call(lambda: self.backend.move(nested_name, nested_new_name), volume=0)
+            if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                self._cache_move(nested_name, nested_new_name)
 
-    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
-        """
-        efficiently create a new item (target) by combining blocks from existing items (sources)
-        in the same namespace. item and target names are always without namespace.
-
-        sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
-        in order of appearance in the list and their contents will be appended to the target item.
-
-        if the target name is not given, algorithm must be given to compute the target name
-        as hash(algorithm, target_content).hexdigest().
-
-        returns the target name.
-        """
-        prefix = (namespace + "/") if namespace else ""
-        mapped_sources = [
-            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
-        ]
-        if target is not None:
-            target = self.find(prefix + target, deleted=deleted)
-
-        levels = self._get_levels(prefix)[-1] if prefix else 0
-        backend_target = self.backend.defrag(
-            mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
-        )
-        return unnest(backend_target, namespace=prefix).removeprefix(prefix)
+    def _cache_list(self, name: str) -> Iterator[ItemInfo]:
+        if self.cache_backend is None:
+            return
+        for info in self.cache_backend.list(name):
+            if info.directory:
+                subdir_name = (name + "/" + info.name) if name else info.name
+                yield from self._cache_list(subdir_name)
+            else:
+                full_name = (name + "/" + info.name) if name else info.name
+                yield info._replace(name=full_name)
 
     def list(self, name: str, deleted: bool = False) -> Iterator[ItemInfo]:
         """
@@ -323,6 +577,10 @@ class Store:
 
         backend.list giving us sorted names implies Store.list is also sorted,
         if all items are stored on the same level.
+
+        Note: list bypasses the cache and always queries the primary backend to ensure we
+        only return items that really exist there, even if other clients have updated or
+        deleted items directly in the primary backend.
         """
         # we need this wrapper due to the recursion - we only want to increment list_calls once:
         logger.debug(f"borgstore: list_start({name!r}, deleted={deleted})")
@@ -367,3 +625,66 @@ class Store:
                     yield info._replace(name=info.name.removesuffix(DEL_SUFFIX))
                 elif not deleted and not is_deleted:
                     yield info
+
+    def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
+        with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
+            return self._backend_call(
+                lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
+            )
+
+    def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
+        """
+        efficiently create a new item (target) by combining blocks from existing items (sources)
+        in the same namespace. item and target names are always without namespace.
+
+        sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
+        in order of appearance in the list and their contents will be appended to the target item.
+
+        if the target name is not given, algorithm must be given to compute the target name
+        as hash(algorithm, target_content).hexdigest().
+
+        returns the target name.
+        """
+        prefix = (namespace + "/") if namespace else ""
+        mapped_sources = [
+            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
+        ]
+        if target is not None:
+            target = self.find(prefix + target, deleted=deleted)
+
+        # Note: defrag does not interact with the cache. It creates a new item from
+        # the chunks of the source items we want to keep. It does not delete the source
+        # items; that is the task of the caller after defrag successfully returns the new
+        # item name. If the caller subsequently deletes the source items, they will be
+        # removed from the cache.
+        levels = self._get_levels(prefix)[-1] if prefix else 0
+        backend_target = self.backend.defrag(
+            mapped_sources, target=target, algorithm=algorithm, namespace=prefix.rstrip("/"), levels=levels
+        )
+        return unnest(backend_target, namespace=prefix).removeprefix(prefix)
+
+    def _cache_cleanup_expired(self) -> None:
+        now = time.time()
+        for namespace, policy in self.cache_namespaces:
+            if policy.max_age is None and policy.size is None:
+                continue
+            try:
+                items = [info for info in self._cache_list(namespace.rstrip("/")) if not info.directory]
+                if policy.max_age is not None:
+                    remaining_items = []
+                    for info in items:
+                        if not info.atime or (now - info.atime) > policy.max_age:
+                            self._cache_delete(info.name)
+                        else:
+                            remaining_items.append(info)
+                    items = remaining_items
+                if policy.size is not None:
+                    total_size = sum(info.size for info in items)
+                    for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
+                        if total_size <= policy.size:
+                            break
+                        self._cache_delete(info.name)
+                        total_size -= info.size
+            except Exception as err:
+                logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
+                self._stats["cache_errors"] += 1

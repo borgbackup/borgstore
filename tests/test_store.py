@@ -81,7 +81,13 @@ def test_basics(posixfs_store_created):
         assert store.backend.info("two/00/00/00000000").size == len(v0)
         assert not store.backend.info("two/00/00/00000000").directory
 
-        assert list(store.list(ns)) == [ItemInfo(name=k0, exists=True, size=len(v0), directory=False)]
+        items = list(store.list(ns))
+        assert len(items) == 1
+        assert items[0].name == k0
+        assert items[0].exists
+        assert items[0].size == len(v0)
+        assert not items[0].directory
+        assert items[0].atime >= 0
 
         store.delete(nsk0)
 
@@ -91,6 +97,7 @@ def test_basics(posixfs_store_created):
         assert not store.backend.info("two/00/00/00000000").exists
 
         assert list(store.list(ns)) == []
+        assert store.stats["backend_delete_calls"] == 1
 
 
 def test_defrag_nested(posixfs_store_created):
@@ -198,7 +205,7 @@ def test_upgrade_levels(posixfs_store_created):
         # Store k0 on level 0:
         store.store(k0, v0)
         assert store.find(k0) == "" + k0  # found on level 0
-        assert store.info(k0) == ii0
+        assert store.info(k0)[:4] == ii0[:4]
         assert list_store_names(store, ROOTNS) == [k0]
 
     # Now upgrade to nesting level 1 (while keeping support for level 0), using the same backend storage:
@@ -206,12 +213,12 @@ def test_upgrade_levels(posixfs_store_created):
     with posixfs_store_created as store:
         # Does k0 still work?
         assert store.find(k0) == "" + k0  # found on level 0
-        assert store.info(k0) == ii0
+        assert store.info(k0)[:4] == ii0[:4]
         assert list_store_names(store, ROOTNS) == [k0]
         # Store k1 on level 1:
         store.store(k1, v1)
         assert store.find(k1) == "00/" + k1  # found on level 1
-        assert store.info(k1) == ii1
+        assert store.info(k1)[:4] == ii1[:4]
         assert list_store_names_sorted(store, ROOTNS) == [k0, k1]
         store.delete(k1)  # just to have it out of the way
 
@@ -220,7 +227,7 @@ def test_upgrade_levels(posixfs_store_created):
         ii0new = ItemInfo(k0, True, 9, False)
         store.store(k0, v0new)
         assert store.find(k0) == "" + k0  # still found on level 0
-        assert store.info(k0) == ii0new
+        assert store.info(k0)[:4] == ii0new[:4]
         # k0 should show up only once, as we overwrote the level 0 item:
         assert list_store_names(store, ROOTNS) == [k0]
         assert store.load(k0) == v0new
@@ -238,7 +245,7 @@ def test_downgrade_levels(posixfs_store_created):
         # Store k1 on level 1:
         store.store(k1, v1)
         assert store.find(k1) == "00/" + k1  # found on level 1
-        assert store.info(k1) == ii1
+        assert store.info(k1)[:4] == ii1[:4]
         assert list_store_names(store, ROOTNS) == [k1]
 
     # Now downgrade to nesting level 0 (while keeping support for level 1), using the same backend storage:
@@ -246,12 +253,12 @@ def test_downgrade_levels(posixfs_store_created):
     with posixfs_store_created as store:
         # Does k1 still work?
         assert store.find(k1) == "00/" + k1  # found on level 1
-        assert store.info(k1) == ii1
+        assert store.info(k1)[:4] == ii1[:4]
         assert list_store_names(store, ROOTNS) == [k1]
         # Store k0 on level 0:
         store.store(k0, v0)
         assert store.find(k0) == "" + k0  # found on level 0
-        assert store.info(k0) == ii0
+        assert store.info(k0)[:4] == ii0[:4]
         assert list_store_names_sorted(store, ROOTNS) == [k0, k1]
         store.delete(k0)  # just to have it out of the way
 
@@ -260,7 +267,7 @@ def test_downgrade_levels(posixfs_store_created):
         ii1new = ItemInfo(k1, True, 9, False)
         store.store(k1, v1new)
         assert store.find(k1) == "00/" + k1  # still found on level 1
-        assert store.info(k1) == ii1new
+        assert store.info(k1)[:4] == ii1new[:4]
         # k1 should show up only once, as we overwrote the level 1 item:
         assert list_store_names(store, ROOTNS) == [k1]
         assert store.load(k1) == v1new
@@ -382,6 +389,21 @@ def test_stats(posixfs_store_created):
         assert store._stats["load_volume"] == 100
         store.load(key)
         assert store._stats["load_volume"] == 200
+
+        # Assert default values for cache stats when cache is disabled
+        stats = store.stats
+        assert stats["cache_load_calls"] == 0
+        assert stats["cache_store_calls"] == 0
+        assert stats["cache_delete_calls"] == 0
+        assert stats["cache_load_volume"] == 0
+        assert stats["cache_store_volume"] == 0
+
+        # Assert primary backend stats are tracked accurately
+        assert stats["backend_store_calls"] == 4
+        assert stats["backend_store_volume"] == 200
+        assert stats["backend_load_calls"] == 3
+        assert stats["backend_load_volume"] == 200
+        assert stats["backend_delete_calls"] == 0
 
 
 def test_quota_no_quota(posixfs_store_created):
