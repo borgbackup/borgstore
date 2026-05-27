@@ -97,6 +97,7 @@ def test_basics(posixfs_store_created):
         assert not store.backend.info("two/00/00/00000000").exists
 
         assert list(store.list(ns)) == []
+        assert store.stats["backend_delete_calls"] == 1
 
 
 def test_defrag_nested(posixfs_store_created):
@@ -402,6 +403,7 @@ def test_stats(posixfs_store_created):
         assert stats["backend_store_volume"] == 200
         assert stats["backend_load_calls"] == 3
         assert stats["backend_load_volume"] == 200
+        assert stats["backend_delete_calls"] == 0
 
 
 def test_quota_no_quota(posixfs_store_created):

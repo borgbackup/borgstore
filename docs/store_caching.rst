@@ -123,6 +123,7 @@ Statistics
 - ``cache_delete_calls``
 - ``backend_load_calls``
 - ``backend_store_calls``
+- ``backend_delete_calls``
 - ``backend_load_volume``
 - ``backend_store_volume``
 - ``cache_hit_ratio``

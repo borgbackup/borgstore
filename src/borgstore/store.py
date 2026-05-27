@@ -366,6 +366,7 @@ class Store:
         st["cache_store_volume"] = st.get("cache_store_volume", 0)
         st["backend_load_calls"] = st.get("backend_load_calls", 0)
         st["backend_store_calls"] = st.get("backend_store_calls", 0)
+        st["backend_delete_calls"] = st.get("backend_delete_calls", 0)
         st["backend_load_volume"] = st.get("backend_load_volume", 0)
         st["backend_store_volume"] = st.get("backend_store_volume", 0)
         st["cache_disabled"] = self._cache_disabled
@@ -551,7 +552,7 @@ class Store:
         """
         with self._stats_updater("delete", f"delete({name!r}, deleted={deleted})"):
             nested_name = self.find(name, deleted=deleted)
-            self._backend_call(lambda: self.backend.delete(nested_name), volume=0)
+            self._backend_call(lambda: self.backend.delete(nested_name), key="delete", volume=0)
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_invalidate(nested_name)
 
