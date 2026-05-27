@@ -242,6 +242,8 @@ class Store:
             except Exception as err:
                 logger.warning(f"borgstore: cache open failed, disabling cache: {err!r}")
                 self._cache_disabled = True
+            else:
+                self._cache_cleanup_expired()
 
     def _cache_list(self, name: str) -> Iterator[ItemInfo]:
         if self.cache_backend is None:
@@ -283,7 +285,8 @@ class Store:
     def close(self) -> None:
         self.backend.close()
         if self.cache_backend is not None:
-            self._cache_cleanup_expired()
+            if not self._cache_disabled:
+                self._cache_cleanup_expired()
             try:
                 self.cache_backend.close()
             except Exception as err:

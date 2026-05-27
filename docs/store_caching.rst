@@ -29,9 +29,8 @@ Each cache policy can be provided either as:
 is ``None`` (no age limit).
 
 ``size`` is optional and expressed in bytes. It sets a per-namespace cache
-size budget enforced during ``Store.close()`` by evicting
-least-recently-used items until the namespace total size is within the
-configured budget.
+size budget enforced by evicting least-recently-used items until the namespace
+total size is within the configured budget.
 
 Example::
 
@@ -57,8 +56,8 @@ Behavior
 - Cache keys are identical to primary backend keys (same nesting).
 - Soft-deleted items are cached under the same ``.del`` name as primary.
 - Soft delete/undelete renames cache entries as well.
-- On ``Store.close()``, cache-enabled namespaces are scanned before closing
-  the cache backend. Cleanup order per namespace is:
+- On ``Store.open()`` and ``Store.close()``, cache-enabled namespaces are scanned
+  to clean up the cache. Cleanup order per namespace is:
 
   1. remove expired cache objects when ``max_age`` is configured,
   2. if ``size`` is configured, evict the least-recently-used remaining items
@@ -93,15 +92,16 @@ clients, or if cache corruption is suspected), you can use the
 Limitations
 -----------
 
-- Eviction by ``max_age`` or ``size`` is close-time only (``Store.close()``),
-  not continuous during ``store()``/``load()`` operations.
+- Eviction by ``max_age`` or ``size`` is open-time and close-time only
+  (``Store.open()`` / ``Store.close()``), not continuous during
+  ``store()``/``load()`` operations.
 - No proactive cache validation/revalidation.
 - If an object is deleted in the primary backend by another client, the local
   cache will still have a stale object.
 - ``max_age`` and LRU-by-``size`` depend on backend ``ItemInfo.atime`` support.
   If ``atime`` is 0 (not implemented):
 
-  - using ``max_age`` would empty the cache on ``Store.close()``
+  - using ``max_age`` would empty the cache on ``Store.open()`` or ``Store.close()``
   - using ``size`` would not work in LRU order, because order can't be
     determined
 - If a partial range ``load`` call for an object in a cached namespace causes

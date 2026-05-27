@@ -271,7 +271,7 @@ def test_deleted_reads_use_del_cache_key(tmp_path):
         store.destroy()
 
 
-def test_c_cache_does_not_expire_on_read_but_on_close(tmp_path, monkeypatch):
+def test_c_cache_does_not_expire_on_read_but_on_open(tmp_path, monkeypatch):
     store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
     store.create()
     try:
@@ -384,7 +384,7 @@ def test_cache_stats(tmp_path):
         store.destroy()
 
 
-def test_close_cleans_up_expired_cache_items(tmp_path, monkeypatch):
+def test_open_cleans_up_expired_cache_items(tmp_path, monkeypatch):
     store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
     store.create()
     name, value = "data/00000000", b"abc"
@@ -421,14 +421,16 @@ def test_close_cleans_up_expired_cache_items(tmp_path, monkeypatch):
     store.cache_backend.delete = wrapped_delete
     try:
         store.open()
-        store.close()
         assert delete_calls["count"] == 1
+        store.close()
 
+        # Let's test non-expired case on next open
         atime = 1999.0
+        # Reset count
+        delete_calls["count"] = 0
         store.open()
-        store.store(name, value)
+        assert delete_calls["count"] == 0
         store.close()
-        assert delete_calls["count"] == 1
     finally:
         store.cache_backend.list = original_list
         store.cache_backend.delete = original_delete
@@ -518,7 +520,7 @@ def test_close_cleans_up_expired_before_lru_size_eviction(tmp_path, monkeypatch)
         store.destroy()
 
 
-def test_close_cleanup_errors_are_best_effort(tmp_path):
+def test_open_cleanup_errors_are_best_effort(tmp_path):
     store, _ = make_store(tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH, "max_age": 5}})
     store.create()
     name, value = "data/00000000", b"abc"
@@ -637,11 +639,7 @@ def test_bandwidth_emulation_not_applied_to_cache_backend_calls(tmp_path, monkey
 
 def test_public_cache_invalidate(tmp_path):
     store, _ = make_store(
-        tmp_path,
-        cache={
-            "data/": {"mode": CacheMode.C_WRITETHROUGH},
-            "meta/": {"mode": CacheMode.C_WRITETHROUGH},
-        },
+        tmp_path, cache={"data/": {"mode": CacheMode.C_WRITETHROUGH}, "meta/": {"mode": CacheMode.C_WRITETHROUGH}}
     )
     store.create()
     try:
