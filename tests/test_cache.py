@@ -365,8 +365,6 @@ def test_open_cleans_up_expired_cache_items(tmp_path, monkeypatch):
 
     monkeypatch.setattr("borgstore.store.time.time", fake_time)
     original_list = store.cache_backend.list
-    delete_calls = {"count": 0}
-    original_delete = store.cache_backend.delete
 
     def wrapped_list(backend_name):
         for info in original_list(backend_name):
@@ -377,28 +375,20 @@ def test_open_cleans_up_expired_cache_items(tmp_path, monkeypatch):
                 yield info
 
     store.cache_backend.list = wrapped_list
-
-    def wrapped_delete(backend_name):
-        if backend_name == nested_name:
-            delete_calls["count"] += 1
-        return original_delete(backend_name)
-
-    store.cache_backend.delete = wrapped_delete
     try:
         store.open()
-        assert delete_calls["count"] == 1
+        assert store.stats["cache_delete_calls"] == 1
         store.close()
 
         # Let's test non-expired case on next open
         atime = 1999.0
         # Reset count
-        delete_calls["count"] = 0
+        store._stats["cache_delete_calls"] = 0
         store.open()
-        assert delete_calls["count"] == 0
+        assert store.stats["cache_delete_calls"] == 0
         store.close()
     finally:
         store.cache_backend.list = original_list
-        store.cache_backend.delete = original_delete
         store.destroy()
 
 
