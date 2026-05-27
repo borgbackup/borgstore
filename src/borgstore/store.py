@@ -356,22 +356,22 @@ class Store:
             v = st.get(f"{key}_volume", 0)
             t = st.get(f"{key}_time", 0)
             st[f"{key}_throughput"] = v / t if t else 0
-        st["cache_hits"] = st.get("cache_hits", 0)
-        st["cache_misses"] = st.get("cache_misses", 0)
-        st["cache_errors"] = st.get("cache_errors", 0)
-        st["cache_load_calls"] = st.get("cache_load_calls", 0)
-        st["cache_store_calls"] = st.get("cache_store_calls", 0)
-        st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
-        st["cache_load_volume"] = st.get("cache_load_volume", 0)
-        st["cache_store_volume"] = st.get("cache_store_volume", 0)
         st["backend_load_calls"] = st.get("backend_load_calls", 0)
         st["backend_store_calls"] = st.get("backend_store_calls", 0)
         st["backend_delete_calls"] = st.get("backend_delete_calls", 0)
         st["backend_load_volume"] = st.get("backend_load_volume", 0)
         st["backend_store_volume"] = st.get("backend_store_volume", 0)
         st["cache_disabled"] = self._cache_disabled
+        st["cache_hits"] = st.get("cache_hits", 0)
+        st["cache_misses"] = st.get("cache_misses", 0)
         cache_total = st["cache_hits"] + st["cache_misses"]
         st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
+        st["cache_errors"] = st.get("cache_errors", 0)
+        st["cache_load_calls"] = st.get("cache_load_calls", 0)
+        st["cache_store_calls"] = st.get("cache_store_calls", 0)
+        st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
+        st["cache_load_volume"] = st.get("cache_load_volume", 0)
+        st["cache_store_volume"] = st.get("cache_store_volume", 0)
         return st
 
     def _cache_get(self, nested_name: str) -> Optional[bytes]:
