@@ -88,10 +88,9 @@ class Store:
         self,
         url: Optional[str] = None,
         backend: Optional[BackendBase] = None,
-        levels: Optional[dict] = None,
+        config: Optional[dict] = None,
         permissions: Optional[dict] = None,
         *,
-        cache: Optional[dict[str, CachePolicy | dict]] = None,
         cache_url: Optional[str] = None,
         cache_backend: Optional[BackendBase] = None,
     ):
@@ -103,17 +102,17 @@ class Store:
         if backend is None:
             raise NoBackendGiven("You need to give a backend instance or a backend url.")
         self.backend = backend
-        self.set_levels(levels)
+        if not config or not isinstance(config, dict):
+            raise ValueError("No or invalid config given.")
+        levels_dict = {}
+        cache_policies = {}
+        for namespace, ns_config in config.items():
+            levels_list, policy = self._normalize_namespace_config(ns_config)
+            levels_dict[namespace] = levels_list
+            cache_policies[namespace] = policy
+        self.set_levels(levels_dict)
         if cache_url is not None and cache_backend is not None:
             raise ValueError("Only one of cache_url and cache_backend can be given.")
-        cache = cache or {}
-        if not isinstance(cache, dict):
-            raise ValueError("Invalid cache configuration: expected a dict mapping namespace to policy.")
-        cache_policies = {namespace: self._normalize_cache_policy(policy) for namespace, policy in cache.items()}
-        configured_namespaces = {namespace for namespace, _ in self.levels}
-        for namespace, policy in cache_policies.items():
-            if policy.mode != CacheMode.C_OFF and namespace not in configured_namespaces:
-                raise ValueError(f"Invalid cache namespace configuration: {namespace!r} not in levels.")
         have_cache_enabled_namespaces = any(policy.mode != CacheMode.C_OFF for policy in cache_policies.values())
         if have_cache_enabled_namespaces and cache_url is None and cache_backend is None:
             raise ValueError("cache_url or cache_backend is required for cache modes other than C_OFF.")
@@ -147,26 +146,31 @@ class Store:
         return f"<Store(url={self.url!r}, levels={self.levels!r})>"
 
     @staticmethod
-    def _normalize_cache_policy(policy: CachePolicy | dict) -> CachePolicy:
-        if isinstance(policy, CachePolicy):
-            return policy
-        if isinstance(policy, dict):
-            unknown_keys = set(policy) - {"mode", "max_age", "size"}
-            if unknown_keys:
-                raise ValueError(f"Invalid cache policy keys: {sorted(unknown_keys)!r}")
-            if "mode" not in policy:
-                raise ValueError("Invalid cache policy: 'mode' is required.")
-            mode = CacheMode.from_str(policy["mode"])
-            max_age = policy.get("max_age")
+    def _normalize_namespace_config(ns_config: dict) -> tuple[list[int], "CachePolicy"]:
+        """Parse a per-namespace config dict into (levels, CachePolicy)."""
+        if not isinstance(ns_config, dict):
+            raise ValueError(f"Invalid namespace config: expected a dict, got {type(ns_config).__name__!r}.")
+        unknown_keys = set(ns_config) - {"levels", "cache", "max_age", "size"}
+        if unknown_keys:
+            raise ValueError(f"Invalid namespace config keys: {sorted(unknown_keys)!r}")
+        levels = ns_config.get("levels")
+        if not levels or not isinstance(levels, list):
+            raise ValueError("'levels' is required and must be a non-empty list of ints.")
+        cache_val = ns_config.get("cache")
+        if cache_val is None:
+            policy = CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
+        else:
+            mode = CacheMode.from_str(cache_val)
+            max_age = ns_config.get("max_age")
             if max_age is not None:
                 if not isinstance(max_age, (int, float)) or max_age < 0:
                     raise ValueError(f"Invalid cache max_age value: {max_age!r}")
                 max_age = float(max_age)
-            size = policy.get("size")
+            size = ns_config.get("size")
             if size is not None and (not isinstance(size, int) or size < 0):
                 raise ValueError(f"Invalid cache size value: {size!r}")
-            return CachePolicy(mode=mode, max_age=max_age, size=size)
-        raise ValueError("Invalid cache policy: expected dict or CachePolicy.")
+            policy = CachePolicy(mode=mode, max_age=max_age, size=size)
+        return levels, policy
 
     def _cache_policy_for(self, name: str) -> CachePolicy:
         for namespace, policy in self.cache_namespaces:
