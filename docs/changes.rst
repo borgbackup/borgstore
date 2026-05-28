@@ -1,6 +1,23 @@
 Changelog
 =========
 
+Version 0.5.0 (2026-05-28)
+--------------------------
+
+New features:
+
+- implement an optional cache (modes: off, mirror, writethrough; max_age and
+  size LRU eviction need atime support), see the store_caching.rst docs
+- rclone: add BORGSTORE_RCLONE_DEBUG env var
+
+Other changes:
+
+- Store: remove "levels" argument, replaced by new "config" argument
+- Store: optimize / speed up .find method (no backend.info calls when there
+  is only 1 level, as usual)
+- docs: split README, real docs, sphinx
+
+
 Version 0.4.1 (2026-04-26)
 --------------------------
 

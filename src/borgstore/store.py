@@ -137,13 +137,11 @@ class Store:
         self.bandwidth = float(os.environ.get("BORGSTORE_BANDWIDTH", "0")) / 8  # [bits/s] -> [bytes/s]
 
     def __repr__(self):
-        if self.cache_backend is not None or self.cache_namespaces:
-            cache_backend = self.cache_backend.__class__.__name__ if self.cache_backend is not None else None
-            return (
-                f"<Store(url={self.url!r}, levels={self.levels!r}, "
-                f"cache_namespaces={self.cache_namespaces!r}, cache_backend={cache_backend!r})>"
-            )
-        return f"<Store(url={self.url!r}, levels={self.levels!r})>"
+        backend = self.backend.__class__.__name__ if self.backend is not None else None
+        if self.cache_backend is not None:
+            cache_backend = self.cache_backend.__class__.__name__
+            return f"<Store(backend={backend!r}, cache_backend={cache_backend!r})>"
+        return f"<Store(backend={backend!r})>"
 
     @staticmethod
     def _normalize_namespace_config(ns_config: dict) -> tuple[list[int], "CachePolicy"]:
