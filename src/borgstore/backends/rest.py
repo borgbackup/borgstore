@@ -56,7 +56,7 @@ class StdioSession:
         if self.process is None or self.process.stderr is None:
             return
         for line in self.process.stderr:
-            logger.warning("REST stdio server: %s", line.decode("utf-8", errors="replace").rstrip())
+            logger.debug("Remote: %s", line.decode("utf-8", errors="replace").rstrip())
 
     def open(self):
         if self.process is not None:
