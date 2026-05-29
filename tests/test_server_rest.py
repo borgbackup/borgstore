@@ -1,4 +1,7 @@
 import hashlib
+import json
+import subprocess
+import sys
 import threading
 import pytest
 
@@ -12,6 +15,7 @@ from borgstore.server.rest import BorgStoreRESTServer
 from borgstore.backends.rest import get_rest_backend
 from borgstore.backends.posixfs import get_file_backend
 from borgstore.backends.errors import ObjectNotFound, BackendAlreadyExists, QuotaExceeded
+from borgstore.store import get_backend
 
 
 def start_server(backend_url, address, port, username=None, password=None, permissions=None, quota=None):
@@ -281,9 +285,6 @@ def test_rest_server_hash(rest_server_with_auth):
 
 
 def test_rest_server_defrag(tmp_path):
-    import json
-    import requests
-
     backend_url = tmp_path.as_uri()
     address, port = "127.0.0.1", 0
     username, password = "testuser", "testpassword"
@@ -568,3 +569,73 @@ def test_rest_server_quota_method_no_quota(rest_server_with_auth):
         assert q["usage"] == -1
     finally:
         be.close()
+
+
+def test_rest_server_stdio(tmp_path):
+    backend_url = tmp_path.as_uri()
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "borgstore.server.rest", "--stdio", "--backend", backend_url],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    def do_request(method, path, body=b""):
+        headers = {"Accept": "application/vnd.x.borgstore.rest.v1", "Connection": "keep-alive"}
+        req = f"{method} {path} HTTP/1.1\r\n"
+        for k, v in headers.items():
+            req += f"{k}: {v}\r\n"
+        if body:
+            req += f"Content-Length: {len(body)}\r\n"
+        req += "\r\n"
+        proc.stdin.write(req.encode("ascii"))
+        if body:
+            proc.stdin.write(body)
+        proc.stdin.flush()
+
+        # Read status line
+        line = proc.stdout.readline()
+        if not line:
+            return None, b"EOF"
+        status_line = line.decode("ascii").strip()
+        status = int(status_line.split(" ")[1])
+
+        # Read headers
+        resp_headers = {}
+        while True:
+            line = proc.stdout.readline()
+            if line == b"\r\n" or line == b"\n" or not line:
+                break
+            header_line = line.decode("ascii").strip()
+            if ": " in header_line:
+                k, v = header_line.split(": ", 1)
+                resp_headers[k] = v
+
+        # Read body
+        resp_body = b""
+        if "Content-Length" in resp_headers:
+            resp_body = proc.stdout.read(int(resp_headers["Content-Length"]))
+        return status, resp_body
+
+    try:
+        # 1. Create store
+        status, body = do_request("POST", "/?cmd=create")
+        assert status == 200
+
+        # 2. Store something
+        item_data = b"stdio data"
+        status, body = do_request("POST", "/item1", body=item_data)
+        assert status == 200
+
+        # 3. List the store
+        status, body = do_request("GET", "/")
+        assert status == 200
+        items = json.loads(body.decode("utf-8"))
+        assert any(item["name"] == "item1" for item in items)
+
+    finally:
+        proc.stdin.close()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()

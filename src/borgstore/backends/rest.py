@@ -5,7 +5,11 @@ REST http client based backend implementation (use with borgstore.server.rest).
 import os
 import re
 import json
+import sys
+import logging
 import hashlib
+import threading
+import subprocess
 from typing import Iterator, Dict, Optional
 from types import ModuleType
 from http import HTTPStatus as HTTP
@@ -35,15 +39,124 @@ from .errors import (
     BackendMustNotBeOpen,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class StdioSession:
+    def __init__(self, command, auth=None, headers=None, timeout=30):
+        self.command = command
+        self.auth = auth
+        self.headers = headers or {}
+        self.timeout = timeout
+        self.process = None
+        self._stderr_thread = None
+
+    def _drain_stderr(self):
+        if self.process is None or self.process.stderr is None:
+            return
+        for line in self.process.stderr:
+            logger.warning("REST stdio server: %s", line.decode("utf-8", errors="replace").rstrip())
+
+    def open(self):
+        if self.process is not None:
+            return
+        self.process = subprocess.Popen(
+            self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread.start()
+
+    def close(self):
+        if self.process is None:
+            return
+        try:
+            if self.process.stdin is not None:
+                self.process.stdin.close()
+            self.process.wait(timeout=self.timeout)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=self.timeout)
+        finally:
+            if self.process.stdout is not None:
+                self.process.stdout.close()
+            if self.process.stderr is not None:
+                self.process.stderr.close()
+            self.process = None
+            self._stderr_thread = None
+
+    def __enter__(self):
+        self.open()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    def request(self, method, url, params=None, data=None, headers=None, timeout=None):
+        if self.process is None or self.process.stdin is None or self.process.stdout is None:
+            raise BackendError("stdio session is not open")
+
+        request_headers = dict(self.headers)
+        if headers:
+            request_headers.update(headers)
+        request_headers["Connection"] = "keep-alive"
+
+        prepared = requests.Request(
+            method=method, url=url, params=params, data=data, headers=request_headers, auth=self.auth
+        ).prepare()
+
+        body = prepared.body
+        if body is None:
+            body = b""
+        elif isinstance(body, bytes):
+            pass  # ok
+        elif isinstance(body, str):
+            body = body.encode("utf-8")
+        else:
+            raise BackendError(f"unsupported body type: {type(body).__name__}")
+
+        request_line = f"{prepared.method} {prepared.path_url} HTTP/1.1\r\n"
+        header_lines = "".join(f"{k}: {v}\r\n" for k, v in prepared.headers.items())
+        self.process.stdin.write((request_line + header_lines + "\r\n").encode("ascii"))
+        if body:
+            self.process.stdin.write(body)
+        self.process.stdin.flush()
+
+        line = self.process.stdout.readline()
+        if not line:
+            raise BackendError("stdio server closed connection unexpectedly")
+        status_line = line.decode("iso-8859-1").strip()
+        parts = status_line.split(" ", 2)
+        if len(parts) < 2:
+            raise BackendError(f"invalid HTTP status line from stdio server: {status_line!r}")
+        status_code = int(parts[1])
+        reason = parts[2] if len(parts) > 2 else ""
+
+        response_headers = requests.structures.CaseInsensitiveDict()
+        while True:
+            line = self.process.stdout.readline()
+            if line in (b"\r\n", b"\n", b""):
+                break
+            header_line = line.decode("iso-8859-1").strip()
+            if ":" in header_line:
+                key, value = header_line.split(":", 1)
+                response_headers[key.strip()] = value.strip()
+
+        content_length = int(response_headers.get("Content-Length", "0"))
+        response_body = self.process.stdout.read(content_length) if content_length else b""
+
+        response = requests.Response()
+        response.status_code = status_code
+        response.headers = response_headers
+        response._content = response_body
+        response.url = prepared.url
+        response.reason = reason
+        response.encoding = requests.utils.get_encoding_from_headers(response_headers)
+        response.request = prepared
+        return response
+
 
 def get_rest_backend(base_url: str):
-    # http(s)://username:password@hostname:port/sub/path or
-    # http(s)://hostname:port/sub/path + authentication from environment
-    #
-    # note: borgstore.server.rest does not support sub-paths, but sub-paths are
-    # supported in the rest client for use with reverse-proxy setups (see contrib/)
-    # or custom REST servers.
-    if not base_url.startswith(("http:", "https:")):
+    if not base_url.startswith(("http:", "https:", "rest:")):
         return None
 
     if requests is None:
@@ -51,6 +164,12 @@ def get_rest_backend(base_url: str):
             "The REST backend requires dependencies. Install them with: 'pip install borgstore[rest]'"
         )
 
+    # http(s)://username:password@hostname:port/sub/path or
+    # http(s)://hostname:port/sub/path + authentication from environment
+    #
+    # note: borgstore.server.rest does not support sub-paths, but sub-paths are
+    # supported in the rest client for use with reverse-proxy setups (see contrib/)
+    # or custom REST servers.
     http_regex = r"""
         (?P<scheme>http|https)://
         ((?P<username>[^:]+):(?P<password>[^@]+)@)?
@@ -74,6 +193,34 @@ def get_rest_backend(base_url: str):
 
         return REST(base_url, username=username, password=password)
 
+    # rest protocol means: use stdio to talk to a borgstore.server.rest process,
+    # either locally (empty host) or via ssh to the given host. The given path
+    # is used to construct a "file:" backend URL used by the rest server.
+    #
+    # rest:///path - talk to local rest server, path must be abs. fs path
+    # rest://user@host:port/path - ssh to rest server on host, abs. fs path
+    rest_regex = r"""
+        rest://
+        (((?P<user>[^@]+)@)(?P<host>[^:/]+)(:(?P<port>\d+))?)?
+        /  # separator always required
+        (?P<path>/[^?#]*)  # absolute path for now
+    """
+    m = re.match(rest_regex, base_url, re.VERBOSE)
+    if m:
+        path = m.group("path")
+        user = m.group("user")
+        host = m.group("host")
+        port = m.group("port") or "22"
+        if not host:
+            # empty host: don't use ssh, just run the rest server here
+            command = []
+            python = sys.executable
+        else:
+            command = ["ssh", "-p", port, f"{user}@{host}"]
+            python = "python3"
+        command.extend([python, "-m", "borgstore.server.rest", "--stdio", "--backend", f"file://{path}"])
+        return REST(base_url="http://stdio-backend", command=command)
+
 
 class REST(BackendBase):
     def __init__(
@@ -83,12 +230,14 @@ class REST(BackendBase):
         password: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = 30,
+        command=None,
     ):
         self.base_url = base_url.rstrip("/")  # _url method adds slash
         self.headers = headers or {}
         self.headers["Accept"] = "application/vnd.x.borgstore.rest.v1"
         self.timeout = timeout
         self.auth = HTTPBasicAuth(username, password) if username and password else None
+        self.command = command
         self.session = None
 
     def _url(self, path: str) -> str:
@@ -108,6 +257,11 @@ class REST(BackendBase):
         else:  # .create() and .destroy() are called when backend is not opened
             if headers is not None:
                 raise ValueError("custom headers are not supported outside of an open session")
+            if self.command is not None:
+                with StdioSession(
+                    command=self.command, auth=self.auth, headers=self.headers, timeout=self.timeout
+                ) as session:
+                    return session.request(method, url, params=params, data=data, timeout=self.timeout)
             return requests.request(
                 method, url, auth=self.auth, params=params, data=data, headers=self.headers, timeout=self.timeout
             )
@@ -150,9 +304,15 @@ class REST(BackendBase):
 
     def open(self):
         self._assert_closed()
-        self.session = requests.Session()
-        self.session.auth = self.auth
-        self.session.headers.update(self.headers)
+        if self.command is not None:
+            self.session = StdioSession(
+                command=self.command, auth=self.auth, headers=self.headers, timeout=self.timeout
+            )
+            self.session.open()
+        else:
+            self.session = requests.Session()
+            self.session.auth = self.auth
+            self.session.headers.update(self.headers)
 
     def close(self):
         self._assert_open()

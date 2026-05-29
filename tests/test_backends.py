@@ -360,6 +360,29 @@ def test_rest_url(url, base_url, username, password):
         assert backend.auth is None
 
 
+@pytest.mark.skipif(not rest_is_available, reason="REST is not available (requests missing)")
+def test_rest_stdio_backend(tmp_path):
+    backend_url = f"rest:///{tmp_path}"  # empty host == no ssh
+    backend = get_rest_backend(backend_url)
+    assert isinstance(backend, REST)
+
+    backend.create()
+    backend.open()
+    try:
+        backend.store("item1", b"stdio-backend-data")
+        assert backend.load("item1") == b"stdio-backend-data"
+
+        items = [item.name for item in backend.list(ROOTNS)]
+        assert "item1" in items
+
+        backend.delete("item1")
+        with pytest.raises(ObjectNotFound):
+            backend.load("item1")
+    finally:
+        backend.close()
+        backend.destroy()
+
+
 @pytest.mark.parametrize(
     "url,bucket,path", [("s3:/bucket/path", "bucket", "path"), ("s3:/bucket/my%20path", "bucket", "my path")]
 )

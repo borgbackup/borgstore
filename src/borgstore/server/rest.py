@@ -6,9 +6,10 @@ import base64
 import logging
 import os
 import socket
+import sys
 import itertools
 from http import HTTPStatus as HTTP
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlsplit, parse_qs
 
 from ..backends.errors import (
@@ -370,6 +371,82 @@ def get_pre_bound_socket():
     return socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
 
 
+class StdinStdoutSocket:
+    """A mock socket that redirects reads to stdin and writes to stdout."""
+
+    def __init__(self):
+        # Use .buffer to handle raw bytes instead of text strings
+        self.rfile = sys.stdin.buffer
+        self.wfile = sys.stdout.buffer
+
+    def makefile(self, mode="r", buffering=None, encoding=None, errors=None, newline=None):
+        """The HTTP request handler calls makefile() to get read/write streams."""
+        if "r" in mode:
+            return self.rfile
+        elif "w" in mode:
+            return self.wfile
+
+    def sendall(self, data, flags=0):
+        """Directly writes all data to stdout and flushes."""
+        self.wfile.write(data)
+        self.wfile.flush()
+
+    def send(self, data, flags=0):
+        """Writes data to stdout and returns the number of bytes written."""
+        self.wfile.write(data)
+        self.wfile.flush()
+        return len(data)
+
+    def recv(self, bufsize, flags=0):
+        """Reads up to bufsize bytes from stdin."""
+        return self.rfile.read(bufsize)
+
+    def getsockname(self):
+        """Required by the server to log or bind addresses."""
+        return ("stdin/stdout", 0)
+
+    def getpeername(self):
+        """Required by the handler for logging client info."""
+        return ("stdio-client", 0)
+
+    def close(self):
+        """Prevent closing the actual sys.stdin/stdout prematurely."""
+        pass
+
+
+class StdIOHTTPServer(HTTPServer):
+    """An HTTPServer variant that handles requests over stdin/stdout."""
+
+    def __init__(self, RequestHandlerClass):
+        # Skip the base TCPServer __init__ entirely because we aren't binding to a network port
+        self.server_address = ("stdin/stdout", 0)
+        self.RequestHandlerClass = RequestHandlerClass
+
+        # Instantiate our fake socket
+        self.socket = StdinStdoutSocket()
+
+    def serve_forever(self, poll_interval=0.5):
+        """Continuously handle requests until stdin is empty/closed."""
+        # Instantiate the handler once
+        handler = self.RequestHandlerClass(self.socket, ("stdio-client", 0), self)
+
+        while True:
+            # Check if stdin has reached EOF
+            # If the client closes the stream or sends 0 bytes, we break
+            if self.socket.rfile.peek(1) == b"":
+                break
+
+            handler.handle_one_request()
+
+
+class BorgStoreStdioRESTServer(StdIOHTTPServer):
+    def __init__(self, backend, username=None, password=None):
+        self.backend = backend
+        self.username = username
+        self.password = password
+        super().__init__(BorgStoreRESTRequestHandler)
+
+
 class BorgStoreRESTServer(ThreadingHTTPServer):
     """
     BorgStore REST Server.
@@ -456,11 +533,24 @@ def resolve_permissions(permissions):
         raise ValueError(f"Invalid --permissions value: {permissions!r}. Use a shortcut ({valid}) or a JSON object.")
 
 
-def serve(host, port, backend_url, username=None, password=None, permissions=None, quota=None, socket_activation=False):
+def serve(
+    host,
+    port,
+    backend_url,
+    username=None,
+    password=None,
+    permissions=None,
+    quota=None,
+    socket_activation=False,
+    stdio=False,
+):
     backend = get_backend(backend_url, permissions=permissions, quota=quota)
     if backend is None:
         raise ValueError(f"Invalid backend URL: {backend_url}")
-    if socket_activation:
+    if stdio:
+        server = BorgStoreStdioRESTServer(backend, username, password)
+        logger.info("BorgStore REST server listening on stdin/stdout")
+    elif socket_activation:
         adopted = get_pre_bound_socket()
         adopted.setblocking(True)
         server_address = adopted.getsockname()
@@ -493,6 +583,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--socket-activation", action="store_true", help="Adopt pre-bound socket from systemd (SD_LISTEN_FDS)"
     )
+    parser.add_argument("--stdio", action="store_true", help="Serve on stdio")
     args = parser.parse_args()
     permissions = resolve_permissions(args.permissions)
     serve(
@@ -504,4 +595,5 @@ if __name__ == "__main__":
         permissions,
         args.quota,
         args.socket_activation,
+        args.stdio,
     )
