@@ -372,6 +372,36 @@ def get_pre_bound_socket():
     return socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
 
 
+class _UnclosableStream:
+    """Wraps a binary stream and makes close() a no-op so that
+    StreamRequestHandler.finish() cannot close sys.stdin/sys.stdout."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def close(self):
+        pass  # intentionally do nothing
+
+    @property
+    def closed(self):
+        return self._stream.closed
+
+    def read(self, *args, **kwargs):
+        return self._stream.read(*args, **kwargs)
+
+    def readline(self, *args, **kwargs):
+        return self._stream.readline(*args, **kwargs)
+
+    def peek(self, *args, **kwargs):
+        return self._stream.peek(*args, **kwargs)
+
+    def write(self, *args, **kwargs):
+        return self._stream.write(*args, **kwargs)
+
+    def flush(self, *args, **kwargs):
+        return self._stream.flush(*args, **kwargs)
+
+
 class StdinStdoutSocket:
     """A mock socket that redirects reads to stdin and writes to stdout."""
 
@@ -381,11 +411,13 @@ class StdinStdoutSocket:
         self.wfile = sys.stdout.buffer
 
     def makefile(self, mode="r", buffering=None, encoding=None, errors=None, newline=None):
-        """The HTTP request handler calls makefile() to get read/write streams."""
+        """The HTTP request handler calls makefile() to get read/write streams.
+        We wrap the underlying buffer in _UnclosableStream so that
+        StreamRequestHandler.finish() cannot close sys.stdin/sys.stdout."""
         if "r" in mode:
-            return self.rfile
+            return _UnclosableStream(self.rfile)
         elif "w" in mode:
-            return self.wfile
+            return _UnclosableStream(self.wfile)
 
     def sendall(self, data, flags=0):
         """Directly writes all data to stdout and flushes."""
@@ -428,16 +460,23 @@ class StdIOHTTPServer(HTTPServer):
 
     def serve_forever(self, poll_interval=0.5):
         """Continuously handle requests until stdin is empty/closed."""
-        # Instantiate the handler once
-        handler = self.RequestHandlerClass(self.socket, ("stdio-client", 0), self)
-
         while True:
-            # Check if stdin has reached EOF
-            # If the client closes the stream or sends 0 bytes, we break
-            if self.socket.rfile.peek(1) == b"":
+            # Instantiate a fresh handler per request so that handler state
+            # (close_connection, headers, etc.) never carries over between
+            # requests.  BaseHTTPRequestHandler.__init__ calls handle() which
+            # calls handle_one_request() internally, so construction == handling.
+            #
+            # handle_one_request() sets raw_requestline=b"" and returns without
+            # sending a response when readline() hits EOF (client closed stdin).
+            # We detect that here and exit cleanly.
+            #
+            # Note: close_connection is NOT a reliable EOF signal — send_error()
+            # and parse_request() both set it True for non-EOF reasons (e.g. 404).
+            # _UnclosableStream ensures finish() cannot close sys.stdin/sys.stdout,
+            # so the stream stays open across requests even after error responses.
+            handler = self.RequestHandlerClass(self.socket, ("stdio-client", 0), self)
+            if getattr(handler, "raw_requestline", b"") == b"":
                 break
-
-            handler.handle_one_request()
 
 
 class BorgStoreStdioRESTServer(StdIOHTTPServer):
