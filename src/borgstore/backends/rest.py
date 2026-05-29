@@ -4,6 +4,7 @@ REST http client based backend implementation (use with borgstore.server.rest).
 
 import os
 import re
+import shlex
 import json
 import sys
 import logging
@@ -155,6 +156,16 @@ class StdioSession:
         return response
 
 
+def ssh_cmd(rsh, user, host, port):
+    """return an ssh command line that can be prefixed to another command line"""
+    rsh = rsh or os.environ.get("BORGSTORE_RSH", "ssh")
+    args = shlex.split(rsh)
+    if port:
+        args += ["-p", str(port)]
+    args += [f"{user}@{host}"] if user else [host]
+    return args
+
+
 def get_rest_backend(base_url: str):
     if not base_url.startswith(("http:", "https:", "rest:")):
         return None
@@ -195,15 +206,23 @@ def get_rest_backend(base_url: str):
 
     # rest protocol means: use stdio to talk to a borgstore.server.rest process,
     # either locally (empty host) or via ssh to the given host. The given path
-    # is used to construct a "file:" backend URL used by the rest server.
+    # is used to construct a "FILE:" (hack!) backend URI used by the rest server.
     #
     # rest:///path - talk to local rest server, path must be abs. fs path
     # rest://user@host:port/path - ssh to rest server on host, abs. fs path
     rest_regex = r"""
         rest://
-        (((?P<user>[^@]+)@)(?P<host>[^:/]+)(:(?P<port>\d+))?)?
+        (
+            (?:(?P<user>[^@:/]+)@)?  # optional user
+            (?P<host>(
+                (?!\[)[^:/]+(?<!\])  # hostname or v4 addr, not containing : or / (does not match v6 addr: no brackets!)
+                |
+                \[[0-9a-fA-F:.]+\])  # ipv6 address in brackets
+            )
+            (?::(?P<port>\d+))?  # optional port
+        )?
         /  # separator always required
-        (?P<path>[^?#]*)  # rel/path or /abs/path or even ~/path or ~user/path
+        (?P<path>[^?#]+)  # non-empty rel/path or /abs/path or even ~/path or ~user/path
     """
     m = re.match(rest_regex, base_url, re.VERBOSE)
     if m:
@@ -216,7 +235,7 @@ def get_rest_backend(base_url: str):
             command = []
             python = sys.executable
         else:
-            command = ["ssh", "-p", port, f"{user}@{host}"]
+            command = ssh_cmd("ssh", user, host, port)
             python = "python3"
         # hack: we do NOT use a standards-compliant file:// URI here, because they only support absolute paths.
         # we just use FILE:path and that path can be relative or absolute or even have ~ or ~user.
