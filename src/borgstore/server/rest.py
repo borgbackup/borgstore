@@ -10,6 +10,7 @@ import sys
 import itertools
 from http import HTTPStatus as HTTP
 from http.server import ThreadingHTTPServer, HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
 from ..backends.errors import (
@@ -544,6 +545,12 @@ def serve(
     socket_activation=False,
     stdio=False,
 ):
+    if backend_url.startswith("FILE:"):
+        # FILE: URIs are special: they are relative to the current working directory.
+        path = backend_url[5:]
+        # If path is relative, make it absolute. expand ~ and ~user.
+        backend_url = Path(path).expanduser().resolve().as_uri()
+        # Now we have a valid file:// URI!
     backend = get_backend(backend_url, permissions=permissions, quota=quota)
     if backend is None:
         raise ValueError(f"Invalid backend URL: {backend_url}")

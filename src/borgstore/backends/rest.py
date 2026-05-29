@@ -203,7 +203,7 @@ def get_rest_backend(base_url: str):
         rest://
         (((?P<user>[^@]+)@)(?P<host>[^:/]+)(:(?P<port>\d+))?)?
         /  # separator always required
-        (?P<path>/[^?#]*)  # absolute path for now
+        (?P<path>[^?#]*)  # rel/path or /abs/path or even ~/path or ~user/path
     """
     m = re.match(rest_regex, base_url, re.VERBOSE)
     if m:
@@ -218,7 +218,10 @@ def get_rest_backend(base_url: str):
         else:
             command = ["ssh", "-p", port, f"{user}@{host}"]
             python = "python3"
-        command.extend([python, "-m", "borgstore.server.rest", "--stdio", "--backend", f"file://{path}"])
+        # hack: we do NOT use a standards-compliant file:// URI here, because they only support absolute paths.
+        # we just use FILE:path and that path can be relative or absolute or even have ~ or ~user.
+        # borgstore.server.rest will translate it to an absolute file:// URI internally.
+        command.extend([python, "-m", "borgstore.server.rest", "--stdio", "--backend", f"FILE:{path}"])
         return REST(base_url="http://stdio-backend", command=command)
 
 
