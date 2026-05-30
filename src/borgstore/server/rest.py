@@ -436,7 +436,7 @@ class StdinStdoutSocket:
 
     def getsockname(self):
         """Required by the server to log or bind addresses."""
-        return ("stdin/stdout", 0)
+        return ("stdio", 0)
 
     def getpeername(self):
         """Required by the handler for logging client info."""
@@ -452,7 +452,10 @@ class StdIOHTTPServer(HTTPServer):
 
     def __init__(self, RequestHandlerClass):
         # Skip the base TCPServer __init__ entirely because we aren't binding to a network port
-        self.server_address = ("stdin/stdout", 0)
+        host, port = "stdio", 0
+        self.server_name = host
+        self.server_port = port
+        self.server_address = (host, port)
         self.RequestHandlerClass = RequestHandlerClass
 
         # Instantiate our fake socket
