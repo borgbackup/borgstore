@@ -129,6 +129,8 @@ class StdioSession:
 
         line = self.process.stdout.readline()
         if not line:
+            if self._stderr_thread is not None:
+                self._stderr_thread.join(timeout=0.5)
             stderr_tail = "\n".join(self._stderr_lines)
             detail = f":\n{stderr_tail}" if stderr_tail else ""
             raise BackendError(f"stdio server closed connection unexpectedly{detail}")
