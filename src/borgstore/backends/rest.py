@@ -74,10 +74,12 @@ class StdioSession:
     def close(self):
         if self.process is None:
             return
+        returncode = None
         try:
             if self.process.stdin is not None:
                 self.process.stdin.close()
             self.process.wait(timeout=self.timeout)
+            returncode = self.process.returncode
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait(timeout=self.timeout)
@@ -86,9 +88,16 @@ class StdioSession:
                 self.process.stdout.close()
             if self.process.stderr is not None:
                 self.process.stderr.close()
+            if self._stderr_thread is not None:
+                self._stderr_thread.join(timeout=0.5)
             self.process = None
             self._stderr_thread = None
+        if returncode:
+            stderr_tail = "\n".join(self._stderr_lines)
+            detail = f":\n{stderr_tail}" if stderr_tail else ""
             self._stderr_lines.clear()
+            raise BackendError(f"stdio server exited with code {returncode}{detail}")
+        self._stderr_lines.clear()
 
     def __enter__(self):
         self.open()
