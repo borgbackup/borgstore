@@ -2,6 +2,7 @@
 REST http client based backend implementation (use with borgstore.server.rest).
 """
 
+import collections
 import os
 import re
 import shlex
@@ -51,12 +52,15 @@ class StdioSession:
         self.timeout = timeout
         self.process = None
         self._stderr_thread = None
+        self._stderr_lines: collections.deque = collections.deque(maxlen=10)  # recent stderr for error messages
 
     def _drain_stderr(self):
         if self.process is None or self.process.stderr is None:
             return
         for line in self.process.stderr:
-            logger.debug("Remote: %s", line.decode("utf-8", errors="replace").rstrip())
+            decoded = line.decode("utf-8", errors="replace").rstrip()
+            self._stderr_lines.append(decoded)
+            logger.debug("Remote: %s", decoded)
 
     def open(self):
         if self.process is not None:
@@ -84,6 +88,7 @@ class StdioSession:
                 self.process.stderr.close()
             self.process = None
             self._stderr_thread = None
+            self._stderr_lines.clear()
 
     def __enter__(self):
         self.open()
@@ -124,7 +129,9 @@ class StdioSession:
 
         line = self.process.stdout.readline()
         if not line:
-            raise BackendError("stdio server closed connection unexpectedly")
+            stderr_tail = "\n".join(self._stderr_lines)
+            detail = f":\n{stderr_tail}" if stderr_tail else ""
+            raise BackendError(f"stdio server closed connection unexpectedly{detail}")
         status_line = line.decode("iso-8859-1").strip()
         parts = status_line.split(" ", 2)
         if len(parts) < 2:
