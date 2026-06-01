@@ -616,7 +616,7 @@ def serve(
         server.server_close()
 
 
-if __name__ == "__main__":
+def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger.setLevel(logging.INFO)
     parser = argparse.ArgumentParser(description="BorgStore REST Server")
@@ -646,3 +646,7 @@ if __name__ == "__main__":
         args.socket_activation,
         args.stdio,
     )
+
+
+if __name__ == "__main__":
+    main()

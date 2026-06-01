@@ -27,7 +27,7 @@ Group=borgstore
 # Minimum required: BORGSTORE_BACKEND, BORGSTORE_USERNAME, BORGSTORE_PASSWORD
 EnvironmentFile=/etc/borgstore/%i.env
 
-ExecStart=/usr/bin/python3 -m borgstore.server.rest \
+ExecStart=/usr/bin/borgstore-server-rest \
     --backend ${BORGSTORE_BACKEND} \
     --username ${BORGSTORE_USERNAME} \
     --password ${BORGSTORE_PASSWORD} \

@@ -574,7 +574,7 @@ def test_rest_server_quota_method_no_quota(rest_server_with_auth):
 def test_rest_server_stdio(tmp_path):
     backend_url = tmp_path.as_uri()
     proc = subprocess.Popen(
-        [sys.executable, "-m", "borgstore.server.rest", "--stdio", "--backend", backend_url],
+        ["borgstore-server-rest", "--stdio", "--backend", backend_url],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -40,6 +40,9 @@ s3 = [
 ]
 none = []
 
+[project.scripts]
+borgstore-server-rest = "borgstore.server.rest:main"
+
 [project.urls]
 Homepage = "https://github.com/borgbackup/borgstore"
 

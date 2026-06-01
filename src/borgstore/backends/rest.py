@@ -7,7 +7,6 @@ import os
 import re
 import shlex
 import json
-import sys
 import logging
 import hashlib
 import threading
@@ -251,17 +250,12 @@ def get_rest_backend(base_url: str):
         user = m.group("user")
         host = m.group("host")
         port = m.group("port") or "22"
-        if not host:
-            # empty host: don't use ssh, just run the rest server here
-            command = []
-            python = sys.executable
-        else:
-            command = ssh_cmd(user, host, port)
-            python = "python3"
+        # empty host: don't use ssh, just run the rest server here
+        command = [] if not host else ssh_cmd(user, host, port)
         # hack: we do NOT use a standards-compliant file:// URI here, because they only support absolute paths.
         # we just use FILE:path and that path can be relative or absolute or even have ~ or ~user.
         # borgstore.server.rest will translate it to an absolute file:// URI internally.
-        command.extend([python, "-m", "borgstore.server.rest", "--stdio", "--backend", f"FILE:{path}"])
+        command.extend(["borgstore-server-rest", "--stdio", "--backend", f"FILE:{path}"])
         return REST(base_url="http://stdio-backend", command=command)
 
 

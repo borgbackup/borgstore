@@ -18,7 +18,7 @@ compatibility. For production use, you **must** add SSL/TLS configuration.
 
 - **`borgstore@.socket`** — systemd creates `/run/borgstore/<name>.sock` and
   starts the matching service on the first incoming connection.
-- **`borgstore@.service`** — runs `borgstore.server.rest --socket-activation`,
+- **`borgstore@.service`** — runs `borgstore-server-rest --socket-activation`,
   adopting the pre-bound socket from systemd.
 - **`nginx-borgstore.conf`** — a single wildcard `location` block routes any
   `/repos/<name>/` URL to the matching Unix socket; nginx strips the path
