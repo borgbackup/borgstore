@@ -6,9 +6,11 @@ import base64
 import logging
 import os
 import socket
+import sys
 import itertools
 from http import HTTPStatus as HTTP
-from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 
 from ..backends.errors import (
@@ -370,6 +372,124 @@ def get_pre_bound_socket():
     return socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
 
 
+class _UnclosableStream:
+    """Wraps a binary stream and makes close() a no-op so that
+    StreamRequestHandler.finish() cannot close sys.stdin/sys.stdout."""
+
+    def __init__(self, stream):
+        self._stream = stream
+
+    def close(self):
+        pass  # intentionally do nothing
+
+    @property
+    def closed(self):
+        return self._stream.closed
+
+    def read(self, *args, **kwargs):
+        return self._stream.read(*args, **kwargs)
+
+    def readline(self, *args, **kwargs):
+        return self._stream.readline(*args, **kwargs)
+
+    def peek(self, *args, **kwargs):
+        return self._stream.peek(*args, **kwargs)
+
+    def write(self, *args, **kwargs):
+        return self._stream.write(*args, **kwargs)
+
+    def flush(self, *args, **kwargs):
+        return self._stream.flush(*args, **kwargs)
+
+
+class StdinStdoutSocket:
+    """A mock socket that redirects reads to stdin and writes to stdout."""
+
+    def __init__(self):
+        # Use .buffer to handle raw bytes instead of text strings
+        self.rfile = sys.stdin.buffer
+        self.wfile = sys.stdout.buffer
+
+    def makefile(self, mode="r", buffering=None, encoding=None, errors=None, newline=None):
+        """The HTTP request handler calls makefile() to get read/write streams.
+        We wrap the underlying buffer in _UnclosableStream so that
+        StreamRequestHandler.finish() cannot close sys.stdin/sys.stdout."""
+        if "r" in mode:
+            return _UnclosableStream(self.rfile)
+        elif "w" in mode:
+            return _UnclosableStream(self.wfile)
+
+    def sendall(self, data, flags=0):
+        """Directly writes all data to stdout and flushes."""
+        self.wfile.write(data)
+        self.wfile.flush()
+
+    def send(self, data, flags=0):
+        """Writes data to stdout and returns the number of bytes written."""
+        self.wfile.write(data)
+        self.wfile.flush()
+        return len(data)
+
+    def recv(self, bufsize, flags=0):
+        """Reads up to bufsize bytes from stdin."""
+        return self.rfile.read(bufsize)
+
+    def getsockname(self):
+        """Required by the server to log or bind addresses."""
+        return ("stdio", 0)
+
+    def getpeername(self):
+        """Required by the handler for logging client info."""
+        return ("stdio-client", 0)
+
+    def close(self):
+        """Prevent closing the actual sys.stdin/stdout prematurely."""
+        pass
+
+
+class StdIOHTTPServer(HTTPServer):
+    """An HTTPServer variant that handles requests over stdin/stdout."""
+
+    def __init__(self, RequestHandlerClass):
+        # Skip the base TCPServer __init__ entirely because we aren't binding to a network port
+        host, port = "stdio", 0
+        self.server_name = host
+        self.server_port = port
+        self.server_address = (host, port)
+        self.RequestHandlerClass = RequestHandlerClass
+
+        # Instantiate our fake socket
+        self.socket = StdinStdoutSocket()
+
+    def serve_forever(self, poll_interval=0.5):
+        """Continuously handle requests until stdin is empty/closed."""
+        while True:
+            # Instantiate a fresh handler per request so that handler state
+            # (close_connection, headers, etc.) never carries over between
+            # requests.  BaseHTTPRequestHandler.__init__ calls handle() which
+            # calls handle_one_request() internally, so construction == handling.
+            #
+            # handle_one_request() sets raw_requestline=b"" and returns without
+            # sending a response when readline() hits EOF (client closed stdin).
+            # We detect that here and exit cleanly.
+            #
+            # Note: close_connection is NOT a reliable EOF signal — send_error()
+            # and parse_request() both set it True for non-EOF reasons (e.g. 404).
+            # _UnclosableStream ensures finish() cannot close sys.stdin/sys.stdout,
+            # so the stream stays open across requests even after error responses.
+            handler = self.RequestHandlerClass(self.socket, ("stdio-client", 0), self)
+            if getattr(handler, "raw_requestline", b"") == b"":
+                break
+
+
+class BorgStoreStdioRESTServer(StdIOHTTPServer):
+    def __init__(self, backend, username=None, password=None):
+        self.backend = backend
+        self.username = username
+        self.password = password
+        super().__init__(BorgStoreRESTRequestHandler)
+
+
 class BorgStoreRESTServer(ThreadingHTTPServer):
     """
     BorgStore REST Server.
@@ -456,11 +576,30 @@ def resolve_permissions(permissions):
         raise ValueError(f"Invalid --permissions value: {permissions!r}. Use a shortcut ({valid}) or a JSON object.")
 
 
-def serve(host, port, backend_url, username=None, password=None, permissions=None, quota=None, socket_activation=False):
+def serve(
+    host,
+    port,
+    backend_url,
+    username=None,
+    password=None,
+    permissions=None,
+    quota=None,
+    socket_activation=False,
+    stdio=False,
+):
+    if backend_url.startswith("FILE:"):
+        # FILE: URIs are special: they are relative to the current working directory.
+        path = backend_url[5:]
+        # If path is relative, make it absolute. expand ~ and ~user.
+        backend_url = Path(path).expanduser().resolve().as_uri()
+        # Now we have a valid file:// URI!
     backend = get_backend(backend_url, permissions=permissions, quota=quota)
     if backend is None:
         raise ValueError(f"Invalid backend URL: {backend_url}")
-    if socket_activation:
+    if stdio:
+        server = BorgStoreStdioRESTServer(backend, username, password)
+        logger.info("BorgStore REST server listening on stdin/stdout")
+    elif socket_activation:
         adopted = get_pre_bound_socket()
         adopted.setblocking(True)
         server_address = adopted.getsockname()
@@ -477,7 +616,7 @@ def serve(host, port, backend_url, username=None, password=None, permissions=Non
         server.server_close()
 
 
-if __name__ == "__main__":
+def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     logger.setLevel(logging.INFO)
     parser = argparse.ArgumentParser(description="BorgStore REST Server")
@@ -493,6 +632,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--socket-activation", action="store_true", help="Adopt pre-bound socket from systemd (SD_LISTEN_FDS)"
     )
+    parser.add_argument("--stdio", action="store_true", help="Serve on stdio")
     args = parser.parse_args()
     permissions = resolve_permissions(args.permissions)
     serve(
@@ -504,4 +644,9 @@ if __name__ == "__main__":
         permissions,
         args.quota,
         args.socket_activation,
+        args.stdio,
     )
+
+
+if __name__ == "__main__":
+    main()

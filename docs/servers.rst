@@ -13,17 +13,26 @@ cloud storage servers:
 - server-side hash computation (e.g. sha256) for item content
 - server-side defragmentation helper (copies blocks to new items)
 
-Running the server
-------------------
+Running the server on host:port
+-------------------------------
 
 Run a server with a file: backend (for a local directory), using HTTP Basic Authentication::
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore
 
 For production deployments, consider using systemd socket activation
 (see contrib/server/nginx-systemd/README.md).
+
+Running the server via stdio
+----------------------------
+
+Run a server with a file: backend (for a local directory), talking http via
+stdin/stdout, logging via stderr:
+
+    borgstore-server-rest --stdio \
+        --backend file:///tmp/teststore
 
 Accessing the server from a client
 ----------------------------------
@@ -31,6 +40,13 @@ Accessing the server from a client
 The borgstore REST client can then access via::
 
     http://user:pass@127.0.0.1:5618/
+
+or (when using http over stdio):
+
+    rest://user@host:port//tmp/teststore  # via ssh, abs. path
+    rest://user@host:port/teststore       # via ssh, rel. path
+    rest:////tmp/teststore                # locally, without ssh, abs. path
+    rest:///teststore                     # locally, without ssh, rel. path
 
 Permissions
 -----------
@@ -45,24 +61,24 @@ Examples:
 
 Read-only access::
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lr"}'
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore \
+        --permissions '{"": "lr"}'
 
 No-delete, no-overwrite (allow adding new items)::
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lrw"}'
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore \
+        --permissions '{"": "lrw"}'
 
 Full access::
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "lrwWD"}'
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore \
+        --permissions '{"": "lrwWD"}'
 
 BorgBackup shortcuts
 ~~~~~~~~~~~~~~~~~~~~
@@ -87,10 +103,10 @@ Example — restrict a backup server to no-delete access:
 
 .. code-block:: bash
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///home/user/repos/repo1 \
-            --permissions borgbackup-no-delete
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///home/user/repos/repo1 \
+        --permissions borgbackup-no-delete
 
 Custom JSON permissions
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -99,10 +115,10 @@ You can also pass an arbitrary JSON-encoded permissions mapping directly.
 
 Hierarchical rules (list-only at root, read/write in ``data/``)::
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --permissions '{"": "l", "data": "lrw"}'
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore \
+        --permissions '{"": "l", "data": "lrw"}'
 
 Quota
 -----
@@ -120,8 +136,8 @@ Example — limit storage to 1 GiB:
 
 .. code-block:: bash
 
-    python3 -m borgstore.server.rest --host 127.0.0.1 --port 5618 \
-            --username user --password pass \
-            --backend file:///tmp/teststore \
-            --quota 1073741824
+    borgstore-server-rest --host 127.0.0.1 --port 5618 \
+        --username user --password pass \
+        --backend file:///tmp/teststore \
+        --quota 1073741824
 
