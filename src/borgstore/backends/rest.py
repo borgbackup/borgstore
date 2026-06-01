@@ -174,12 +174,15 @@ class StdioSession:
         return response
 
 
-def ssh_cmd(rsh, user, host, port):
+def ssh_cmd(user, host, port):
     """return an ssh command line that can be prefixed to another command line"""
-    rsh = rsh or os.environ.get("BORGSTORE_RSH", "ssh")
-    args = shlex.split(rsh)
-    if port:
-        args += ["-p", str(port)]
+    rsh = os.environ.get("BORGSTORE_RSH")
+    if rsh:
+        args = shlex.split(rsh)
+    else:
+        args = ["ssh"]
+        if port:
+            args += ["-p", str(port)]
     args += [f"{user}@{host}"] if user else [host]
     return args
 
@@ -253,7 +256,7 @@ def get_rest_backend(base_url: str):
             command = []
             python = sys.executable
         else:
-            command = ssh_cmd("ssh", user, host, port)
+            command = ssh_cmd(user, host, port)
             python = "python3"
         # hack: we do NOT use a standards-compliant file:// URI here, because they only support absolute paths.
         # we just use FILE:path and that path can be relative or absolute or even have ~ or ~user.
