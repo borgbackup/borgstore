@@ -1,6 +1,24 @@
 Changelog
 =========
 
+Version 0.5.1 (2026-06-02)
+--------------------------
+
+New features:
+
+- borgstore.server.rest: support REST http via stdio (so one can, for example,
+  invoke borgstore-server-rest --stdio via ssh). Speaks http over stdin/stdout,
+  stderr is used for log output.
+- Store now supports "rest:" backend URLs:
+
+  - rest://user@host:port/relative/path - creates an ssh connection to a
+    remote system, starts a borgstore-server-rest process there with a posixfs
+    backend at ./relative/path on the remote system.
+  - rest:///relative/path - creates and connects to a borgstore-server-rest
+    process with a posixfs backend at ./relative/path on the local system,
+    without using ssh (good for testing).
+
+
 Version 0.5.0 (2026-05-28)
 --------------------------
 
