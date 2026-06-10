@@ -11,7 +11,7 @@ from setuptools_scm import get_version
 project = "BorgStore"
 copyright = "2026, Thomas Waldmann"
 author = "Thomas Waldmann"
-release = get_version(root="..", relative_to=__file__)
+release = get_version(root="..", fallback_root="..", relative_to=__file__)
 version = ".".join(release.split(".")[:2])
 
 # -- General configuration ---------------------------------------------------
