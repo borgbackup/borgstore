@@ -325,16 +325,12 @@ class PosixFS(BackendBase):
         path = self._validate_join(name)
         self._check_permission(name, "r")
         try:
-            h = hashlib.new(algorithm)
+            hashlib.new(algorithm)
         except ValueError:
             raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
         try:
             with path.open("rb") as f:
-                while True:
-                    data = f.read(1024 * 1024)
-                    if not data:
-                        break
-                    h.update(data)
+                h = hashlib.file_digest(f, algorithm)
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
         return h.hexdigest()
