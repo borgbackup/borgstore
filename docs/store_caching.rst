@@ -100,7 +100,8 @@ Limitations
 - No proactive cache validation/revalidation.
 - If an object is deleted in the primary backend by another client, the local
   cache will still have a stale object.
-- ``max_age`` and LRU-by-``size`` depend on backend ``ItemInfo.atime`` support.
+- ``max_age`` and LRU-by-``size`` depend on backend ``ItemInfo.atime`` support,
+  currently that is supported by ``posixfs`` and ``REST`` backends.
   If ``atime`` is 0 (not implemented):
 
   - using ``max_age`` would empty the cache on ``Store.open()`` or ``Store.close()``
