@@ -296,10 +296,6 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
     @checks_and_logging
     def do_HEAD(self):
-        if not self.name:
-            self.send_error(HTTP.BAD_REQUEST, "Bad Request")
-            return
-
         try:
             with self.server.backend:
                 info = self.server.backend.info(self.name)
