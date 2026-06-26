@@ -613,7 +613,7 @@ def test_rest_server_stdio(tmp_path):
 
         # Read body
         resp_body = b""
-        if "Content-Length" in resp_headers:
+        if method.upper() != "HEAD" and "Content-Length" in resp_headers:
             resp_body = proc.stdout.read(int(resp_headers["Content-Length"]))
         return status, resp_body
 
@@ -632,6 +632,16 @@ def test_rest_server_stdio(tmp_path):
         assert status == 200
         items = json.loads(body.decode("utf-8"))
         assert any(item["name"] == "item1" for item in items)
+
+        # 4. Info (HEAD)
+        status, body = do_request("HEAD", "/item1")
+        assert status == 200
+        assert body == b""
+
+        # 5. Info for nonexistent (HEAD)
+        status, body = do_request("HEAD", "/nonexistent")
+        assert status == 404
+        assert body == b""
 
     finally:
         proc.stdin.close()

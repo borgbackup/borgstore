@@ -160,7 +160,7 @@ class StdioSession:
                 response_headers[key.strip()] = value.strip()
 
         content_length = int(response_headers.get("Content-Length", "0"))
-        response_body = self.process.stdout.read(content_length) if content_length else b""
+        response_body = self.process.stdout.read(content_length) if method.upper() != "HEAD" and content_length else b""
 
         response = requests.Response()
         response.status_code = status_code
