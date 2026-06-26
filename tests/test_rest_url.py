@@ -22,6 +22,13 @@ def test_rest_url_info(tmp_path):
         info = store.info(item_name)
         assert info.exists
         assert info.size == len(item_data)
+        assert info.atime > 0
+
+        # Test listing
+        items = list(store.list(""))
+        assert len(items) == 1
+        assert items[0].name == item_name
+        assert items[0].atime > 0
 
         # Test nonexistent item
         # This also used to hang if it returned a 404 with a body.

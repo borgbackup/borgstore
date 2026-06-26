@@ -376,8 +376,9 @@ class REST(BackendBase):
             self._handle_response(response, name)  # raises!
         exists = response.status_code == HTTP.OK
         is_dir = response.headers.get("X-BorgStore-Is-Directory") == "true"
+        atime = float(response.headers.get("X-BorgStore-Atime", 0))
         size = int(response.headers.get("Content-Length", 0)) if exists else 0
-        return ItemInfo(name=name, exists=exists, size=size, directory=is_dir)
+        return ItemInfo(name=name, exists=exists, size=size, directory=is_dir, atime=atime)
 
     def load(self, name: str, *, size=None, offset=0) -> bytes:
         self._assert_open()
@@ -461,4 +462,10 @@ class REST(BackendBase):
         response = self._request("get", self._url(name) + "/")  # trailing "/" needed to get list
         self._handle_response(response, name)
         for entry in response.json():
-            yield ItemInfo(name=entry["name"], exists=True, size=entry["size"], directory=entry.get("directory", False))
+            yield ItemInfo(
+                name=entry["name"],
+                exists=True,
+                size=entry["size"],
+                directory=entry.get("directory", False),
+                atime=entry.get("atime", 0),
+            )

@@ -617,31 +617,32 @@ def test_rest_server_stdio(tmp_path):
         resp_body = b""
         if method.upper() != "HEAD" and "Content-Length" in resp_headers:
             resp_body = proc.stdout.read(int(resp_headers["Content-Length"]))
-        return status, resp_body
+        return status, resp_body, resp_headers
 
     try:
         # 1. Create store
-        status, body = do_request("POST", "/?cmd=create")
+        status, body, headers = do_request("POST", "/?cmd=create")
         assert status == 200
 
         # 2. Store something
         item_data = b"stdio data"
-        status, body = do_request("POST", "/item1", body=item_data)
+        status, body, headers = do_request("POST", "/item1", body=item_data)
         assert status == 200
 
         # 3. List the store
-        status, body = do_request("GET", "/")
+        status, body, headers = do_request("GET", "/")
         assert status == 200
         items = json.loads(body.decode("utf-8"))
-        assert any(item["name"] == "item1" for item in items)
+        assert any(item["name"] == "item1" and item.get("atime", 0) > 0 for item in items)
 
         # 4. Info (HEAD)
-        status, body = do_request("HEAD", "/item1")
+        status, body, headers = do_request("HEAD", "/item1")
         assert status == 200
         assert body == b""
+        assert float(headers.get("X-BorgStore-Atime", 0)) > 0
 
         # 5. Info for nonexistent (HEAD)
-        status, body = do_request("HEAD", "/nonexistent")
+        status, body, headers = do_request("HEAD", "/nonexistent")
         assert status == 404
         assert body == b""
 
