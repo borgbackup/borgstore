@@ -6,12 +6,12 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-from setuptools_scm import get_version
+from importlib.metadata import version as pkg_version
 
 project = "BorgStore"
 copyright = "2026, Thomas Waldmann"
 author = "Thomas Waldmann"
-release = get_version(root="..", relative_to=__file__)
+release = pkg_version("borgstore")
 version = ".".join(release.split(".")[:2])
 
 # -- General configuration ---------------------------------------------------

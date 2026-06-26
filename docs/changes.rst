@@ -1,6 +1,25 @@
 Changelog
 =========
 
+Version 0.5.2 (2026-06-26)
+--------------------------
+
+Fixes:
+
+- REST client: fix info() size for nonexistent objects
+- REST client: fix hang on HEAD requests
+- REST server: allow HEAD requests for root directory
+- REST client/server: add atime support
+- nesting: fix root directory nesting
+
+Other changes:
+
+- require python 3.11+
+- posixfs: use more efficient hashlib.file_digest (available since py311)
+- docs: misc. updates (atime, rest, env vars)
+- docs generation with sphinx: use importlib.metadata to derive version
+
+
 Version 0.5.1 (2026-06-02)
 --------------------------
 

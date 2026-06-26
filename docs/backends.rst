@@ -18,6 +18,7 @@ Use storage on a local POSIX filesystem:
   filesystem path.
 - Namespaces: directories
 - Values: in key-named files
+- atime: supported (require fs atime support)
 - Quota: tracks backend storage size and rejects ``store`` if quota is exceeded.
 
   The current usage is persisted to a hidden file in the storage directory.
@@ -125,6 +126,7 @@ Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ s
   of that to rclone; see: https://rclone.org/docs/#syntax-of-remote-paths
 - The implementation primarily depends on the specific remote.
 - The rclone binary path can be set via the environment variable ``RCLONE_BINARY`` (default: "rclone").
+- Debugging of HTTP requests/responses can be enabled by setting ``BORGSTORE_RCLONE_DEBUG=1``.
 
 
 s3
@@ -159,9 +161,13 @@ REST (http/https)
 
 Use a storage backend running inside a BorgStore REST server process:
 
-- URL: ``http[s]://[user:password@]host:port/path``
+- URL: ``http[s]://[user:password@]host:port/path`` (REST via TCP)
+- URL: ``rest://[user@]host[:port]/path`` (REST via stdio via ssh)
+- URL: ``rest:///path`` (REST via local stdio, e.g. for testing)
+
 - Namespaces: depends on backend used by the server
 - Values: depends on backend used by the server
 - Authentication: Optional Basic Auth is supported.
 - hash: runs the hexdigest computation server-side.
 - defrag: runs the defragmentation helper server-side.
+- atime: supported (if backend used by server supports it).

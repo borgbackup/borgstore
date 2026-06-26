@@ -29,6 +29,32 @@ Store operations (and per-op timing and volume) are logged at DEBUG log level.
 See also :doc:`store_caching` for optional Store-level caching with a secondary backend.
 
 
+Initialization
+--------------
+
+The ``Store`` is the main entry point to the API. It is initialized with a
+backend URL and an optional configuration dictionary:
+
+.. code-block:: python
+
+    from borgstore import Store
+
+    store = Store(
+        url="file:///abs/path",
+        config={
+            "data": {"levels": [1]},
+            "config": {"levels": [0]},
+        },
+    )
+
+The ``config`` dictionary maps namespace names to their configuration.
+The following keys are supported in each namespace configuration:
+
+- ``levels`` (required): A list of integers specifying the nesting depths
+  supported for the namespace.
+
+See :doc:`store_caching` for details on caching.
+
 .. _store-latency-bandwidth-emulator:
 
 Latency and bandwidth emulator
