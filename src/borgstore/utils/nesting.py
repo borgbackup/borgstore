@@ -41,7 +41,7 @@ def split_key(name: str) -> tuple[Optional[str], str]:
 
 def nest(name: str, levels: int, *, add_suffix: Optional[str] = None) -> str:
     """namespace/12345678 --2 levels--> namespace/12/34/12345678"""
-    if levels > 0:
+    if levels > 0 and name:
         namespace, key = split_key(name)
         parts = [key[2 * level : 2 * level + 2] for level in range(levels)]
         parts.append(key)

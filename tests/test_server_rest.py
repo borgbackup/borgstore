@@ -15,7 +15,7 @@ from borgstore.server.rest import BorgStoreRESTServer
 from borgstore.backends.rest import get_rest_backend
 from borgstore.backends.posixfs import get_file_backend
 from borgstore.backends.errors import ObjectNotFound, BackendAlreadyExists, QuotaExceeded
-from borgstore.store import get_backend
+from borgstore.store import get_backend, Store
 
 
 def start_server(backend_url, address, port, username=None, password=None, permissions=None, quota=None):
@@ -76,7 +76,9 @@ def test_rest_server_basic_ops(rest_server_with_auth):
         be.delete("test/item1")
         with pytest.raises(ObjectNotFound):
             be.load("test/item1")
-        assert not be.info("test/item1").exists
+        info = be.info("test/item1")
+        assert not info.exists
+        assert info.size == 0
 
     finally:
         be.close()
@@ -613,25 +615,36 @@ def test_rest_server_stdio(tmp_path):
 
         # Read body
         resp_body = b""
-        if "Content-Length" in resp_headers:
+        if method.upper() != "HEAD" and "Content-Length" in resp_headers:
             resp_body = proc.stdout.read(int(resp_headers["Content-Length"]))
-        return status, resp_body
+        return status, resp_body, resp_headers
 
     try:
         # 1. Create store
-        status, body = do_request("POST", "/?cmd=create")
+        status, body, headers = do_request("POST", "/?cmd=create")
         assert status == 200
 
         # 2. Store something
         item_data = b"stdio data"
-        status, body = do_request("POST", "/item1", body=item_data)
+        status, body, headers = do_request("POST", "/item1", body=item_data)
         assert status == 200
 
         # 3. List the store
-        status, body = do_request("GET", "/")
+        status, body, headers = do_request("GET", "/")
         assert status == 200
         items = json.loads(body.decode("utf-8"))
-        assert any(item["name"] == "item1" for item in items)
+        assert any(item["name"] == "item1" and item.get("atime", 0) > 0 for item in items)
+
+        # 4. Info (HEAD)
+        status, body, headers = do_request("HEAD", "/item1")
+        assert status == 200
+        assert body == b""
+        assert float(headers.get("X-BorgStore-Atime", 0)) > 0
+
+        # 5. Info for nonexistent (HEAD)
+        status, body, headers = do_request("HEAD", "/nonexistent")
+        assert status == 404
+        assert body == b""
 
     finally:
         proc.stdin.close()
@@ -639,3 +652,45 @@ def test_rest_server_stdio(tmp_path):
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_rest_url(tmp_path):
+    repo_path = tmp_path / "repo"
+    # Use rest: URL with stdio backend (empty host)
+    url = f"rest:///{repo_path}"
+
+    # Use levels=0 to avoid root nesting issues if they arise
+    config = {"": {"levels": [0]}}
+    store = Store(url, config=config)
+    store.create()
+
+    with store:
+        item_name = "test-item"
+        item_data = b"some data"
+        store.store(item_name, item_data)
+
+        # Test Store.info which calls Backend.info (HEAD)
+        # This used to hang.
+        info = store.info(item_name)
+        assert info.exists
+        assert info.size == len(item_data)
+        assert info.atime > 0
+
+        # Test listing
+        items = list(store.list(""))
+        assert len(items) == 1
+        assert items[0].name == item_name
+        assert items[0].atime > 0
+
+        # Test nonexistent item
+        # This also used to hang if it returned a 404 with a body.
+        info_none = store.info("nonexistent")
+        assert not info_none.exists
+        assert info_none.size == 0
+
+        # Test directory info (root)
+        info_root = store.info("")
+        assert info_root.exists
+        assert info_root.directory
+
+    store.destroy()
