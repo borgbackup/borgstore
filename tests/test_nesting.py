@@ -26,6 +26,8 @@ def test_split_key(name, base, key):
         ("data/12345678", 2, False, "data/12/34/12345678"),
         ("data/12345678", 3, False, "data/12/34/56/12345678"),
         ("data/12345678", 3, True, "data/12/34/56/12345678.del"),
+        ("", 1, False, ""),
+        ("", 2, False, ""),
     ],
 )
 def test_nest(key, levels, deleted, nested_key):
