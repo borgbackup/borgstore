@@ -26,5 +26,6 @@ def test_rest_url_info(tmp_path):
         # This also used to hang if it returned a 404 with a body.
         info_none = store.info("nonexistent")
         assert not info_none.exists
+        assert info_none.size == 0
         
     store.destroy()

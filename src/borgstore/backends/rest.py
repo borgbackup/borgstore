@@ -376,7 +376,8 @@ class REST(BackendBase):
             self._handle_response(response, name)  # raises!
         exists = response.status_code == HTTP.OK
         is_dir = response.headers.get("X-BorgStore-Is-Directory") == "true"
-        return ItemInfo(name=name, exists=exists, size=int(response.headers.get("Content-Length", 0)), directory=is_dir)
+        size = int(response.headers.get("Content-Length", 0)) if exists else 0
+        return ItemInfo(name=name, exists=exists, size=size, directory=is_dir)
 
     def load(self, name: str, *, size=None, offset=0) -> bytes:
         self._assert_open()

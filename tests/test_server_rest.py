@@ -76,7 +76,9 @@ def test_rest_server_basic_ops(rest_server_with_auth):
         be.delete("test/item1")
         with pytest.raises(ObjectNotFound):
             be.load("test/item1")
-        assert not be.info("test/item1").exists
+        info = be.info("test/item1")
+        assert not info.exists
+        assert info.size == 0
 
     finally:
         be.close()
