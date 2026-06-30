@@ -380,12 +380,12 @@ class Store:
         with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
             return self._backend_call(lambda: self.backend.info(self.find(name, deleted=deleted)), volume=0)
 
-    def _cache_load(self, nested_name: str) -> Optional[bytes]:
+    def _cache_load(self, nested_name: str, *, size=None, offset=0) -> Optional[bytes]:
         if self.cache_backend is None or self._cache_disabled:
             return None
         self._stats["cache_load_calls"] += 1
         try:
-            value = self.cache_backend.load(nested_name)
+            value = self.cache_backend.load(nested_name, size=size, offset=offset)
         except ObjectNotFound:
             self._stats["cache_misses"] += 1
             return None
@@ -402,14 +402,18 @@ class Store:
             cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
             if cache_policy.mode == CacheMode.C_WRITETHROUGH:
-                full_value = self._cache_load(nested_name)
-                if full_value is None:
-                    full_value = self._backend_call(
-                        lambda: self.backend.load(nested_name, size=None, offset=0),
-                        key="load",
-                        volume=lambda value: len(value),
-                    )
-                    self._cache_store(nested_name, full_value)
+                # try a partial read from the cache first, matching the requested range.
+                cached_value = self._cache_load(nested_name, size=size, offset=offset)
+                if cached_value is not None:
+                    self._stats_update_volume("load", len(cached_value))
+                    return cached_value
+                # cache miss: do a full load from the primary backend and populate the cache.
+                full_value = self._backend_call(
+                    lambda: self.backend.load(nested_name, size=None, offset=0),
+                    key="load",
+                    volume=lambda value: len(value),
+                )
+                self._cache_store(nested_name, full_value)
             elif cache_policy.mode == CacheMode.C_MIRROR:
                 full_value = self._backend_call(
                     lambda: self.backend.load(nested_name, size=None, offset=0),

@@ -173,6 +173,31 @@ def test_c_cache_read_through_and_partial_load(tmp_path):
             assert stats["cache_load_calls"] == 2
             assert stats["cache_hits"] == 1
             assert stats["cache_misses"] == 1
+            # the cache hit was served by a partial read: only the requested 4 bytes were loaded.
+            assert stats["cache_load_volume"] == 4
+    finally:
+        store.destroy()
+
+
+def test_c_cache_hit_uses_partial_read(tmp_path):
+    """On a cache hit, the requested range is read partially from the cache, not fully loaded."""
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
+    store.create()
+    try:
+        with store:
+            name, value = "data/00000000", b"0123456789"
+            store.store(name, value)  # populates the cache (writethrough)
+
+            calls = []
+            orig_load = store.cache_backend.load
+
+            def spy_load(nested_name, *, size=None, offset=0):
+                calls.append((size, offset))
+                return orig_load(nested_name, size=size, offset=offset)
+
+            store.cache_backend.load = spy_load
+            assert store.load(name, size=4, offset=2) == value[2:6]
+            assert calls == [(4, 2)]
     finally:
         store.destroy()
 
