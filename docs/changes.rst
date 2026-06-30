@@ -1,13 +1,14 @@
 Changelog
 =========
 
-Version 0.5.3 (not released yet)
---------------------------------
+Version 0.5.3 (2026-06-30)
+--------------------------
 
 Fixes:
 
 - caching: serve partial reads directly from the cache instead of always
-  doing a full load and slicing afterwards, #182
+  doing a full load from cache and slicing afterwards, #182
+
 
 Version 0.5.2 (2026-06-26)
 --------------------------
