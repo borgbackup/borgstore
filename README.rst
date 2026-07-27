@@ -7,7 +7,8 @@ Overview
 --------
 
 Keys are simple strings like `config/main` or `data/0123456789abcdef` `[str]`
-(config and data are namespaces here). Values are binary objects `[bytes]`.
+(config and data are namespaces here). Values are binary objects `[bytes]` -
+when storing, a `memoryview` is accepted as well, so callers can avoid copying.
 
 The `Store` class is the high-level API, so you can comfortably work with the
 kv store without caring for low-level details.

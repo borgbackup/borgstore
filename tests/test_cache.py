@@ -36,6 +36,27 @@ def make_store(tmp_path, *, config=None, with_cache_backend=True):
     return Store(**kwargs), cache_root
 
 
+def test_cache_store_memoryview(tmp_path):
+    """A memoryview value is written to the primary backend as well as to the cache backend."""
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough"}}))
+    store.create()
+    try:
+        with store:
+            buffer = bytearray(b"0123456789" * 10)
+            name, value = "data/00000000", memoryview(buffer)[10:30]
+            store.store(name, value)
+            assert store.stats["cache_store_calls"] == 1
+            assert store.stats["cache_store_volume"] == 20
+            # served from the cache:
+            assert store.load(name) == bytes(value)
+            assert store.stats["cache_hits"] == 1
+            # ... and the primary backend has it, too:
+            store.cache_invalidate(name)
+            assert store.load(name) == bytes(value)
+    finally:
+        store.destroy()
+
+
 def test_cache_disabled_by_default(tmp_path):
     store, cache_root = make_store(tmp_path, config=None, with_cache_backend=False)
     store.create()

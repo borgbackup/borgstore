@@ -29,7 +29,7 @@ try:
 except ImportError:
     pass
 
-from ._base import BackendBase, ItemInfo, validate_name
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, StoreValue
 from ._utils import make_range_header, ignore_sigint
 from .errors import (
     ObjectNotFound,
@@ -557,9 +557,11 @@ class REST(BackendBase):
         return content
 
     @with_reconnect
-    def store(self, name: str, value: bytes) -> None:
+    def store(self, name: str, value: StoreValue) -> None:
         self._assert_open()
         validate_name(name)
+        # requests sends a memoryview body as it is (with a correct Content-Length), no copy needed.
+        value = validate_value(value)
         algorithm = "sha256"
         headers = {f"X-Content-hash-{algorithm}": hashlib.new(algorithm, value).hexdigest()}
         response = self._request("post", self._url(name), data=value, headers=headers)

@@ -4,6 +4,10 @@ Backends
 The backend API is rather simple; one only needs to provide some very
 basic operations.
 
+``store(name, value)`` accepts a ``bytes`` or a ``memoryview`` value, see
+:ref:`store-values`. Backends that can not give a ``memoryview`` to the library
+they use internally create a ``bytes`` object (one copy) - this is noted below.
+
 Existing backends are listed below; more might come in the future.
 
 See also :doc:`store_caching` for optional Store-level caching with a secondary backend.
@@ -115,6 +119,8 @@ Use storage on an SFTP server:
   - Users must know the full absolute path of the space they are permitted to use.
 - Namespaces: directories
 - Values: in key-named files
+- store: a ``memoryview`` value is copied into a ``bytes`` object first, because
+  paramiko does not accept a ``memoryview``.
 - hash: runs the hexdigest computation server-side (if server supports check-file).
   "blake3" is not part of the check-file extension, so it is always computed client-side.
 
@@ -155,6 +161,8 @@ Use storage on an S3-compliant cloud service:
 
 - Namespaces: directories
 - Values: in key-named files
+- store: a ``memoryview`` value is copied into a ``bytes`` object first, because
+  boto3 does not accept a ``memoryview``.
 
 
 REST (http/https)

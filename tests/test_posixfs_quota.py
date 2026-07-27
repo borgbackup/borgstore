@@ -1,5 +1,6 @@
 """Tests for PosixFS quota support."""
 
+import array
 import time
 
 import pytest
@@ -40,6 +41,16 @@ class TestQuotaTracking:
         assert backend._quota_use == 100
         backend.delete("testobj")
         assert backend._quota_use == 0
+        backend.close()
+
+    def test_memoryview_tracks_size_in_bytes(self, backend):
+        """A memoryview value is accounted with its size in bytes."""
+        backend.open()
+        backend.store("testobj", memoryview(bytearray(b"x" * 200))[50:150])
+        assert backend._quota_use == 100
+        # itemsize 4, so this is 64 bytes (not 16)
+        backend.store("testobj", memoryview(array.array("I", range(16))))
+        assert backend._quota_use == 64
         backend.close()
 
     def test_overwrite_tracks_delta(self, backend):

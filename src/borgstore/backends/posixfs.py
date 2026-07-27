@@ -21,7 +21,7 @@ try:
 except ImportError:
     fcntl = None  # not available on Windows
 
-from ._base import BackendBase, ItemInfo, validate_name
+from ._base import BackendBase, ItemInfo, validate_name, validate_value
 from .errors import BackendError, BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen
 from .errors import ObjectNotFound, PermissionDenied, QuotaExceeded
 from ..constants import TMP_SUFFIX, QUOTA_STORE_NAME, QUOTA_PERSIST_DELTA, QUOTA_PERSIST_INTERVAL
@@ -232,6 +232,7 @@ class PosixFS(BackendBase):
     def store(self, name, value):
         if not self.opened:
             raise BackendMustBeOpen()
+        value = validate_value(value)  # writing a memoryview is supported, no copy needed
         path = self._validate_join(name)
         overwrite = path.exists()
         self._check_permission(name, "W" if overwrite else "wW")

@@ -19,7 +19,7 @@ try:
 except ImportError:
     paramiko = None
 
-from ._base import BackendBase, ItemInfo, validate_name
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, to_bytes
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
 from ..constants import TMP_SUFFIX
@@ -437,6 +437,9 @@ class Sftp(BackendBase):
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(name)
+        # paramiko's file.write only deals with str/bytes, a memoryview would blow up
+        # deeply inside paramiko ("Unknown type for encoding"), so we need a copy here.
+        value = to_bytes(validate_value(value))
         tmp_dir = Path(name).parent
         # write to a differently named temp file in same directory first,
         # so the store never sees partially written data.

@@ -16,7 +16,7 @@ try:
 except ImportError:
     requests = None
 
-from ._base import BackendBase, ItemInfo, validate_name
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, StoreValue
 from ._utils import make_range_header, ignore_sigint
 from .errors import (
     BackendError,
@@ -288,9 +288,11 @@ class Rclone(BackendBase):
             content = content[:size]
         return content
 
-    def store(self, name: str, value: bytes) -> None:
+    def store(self, name: str, value: StoreValue) -> None:
         """Store <value> into <name>."""
         validate_name(name)
+        # requests puts a memoryview into the multipart body as it is, no copy needed.
+        value = validate_value(value)
         files = {"file": (os.path.basename(name), value, "application/octet-stream")}
         params = {"fs": self.fs, "remote": os.path.dirname(name)}
         self._rpc("operations/uploadfile", None, tries=self.TRIES, params=params, files=files)

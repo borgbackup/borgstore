@@ -14,6 +14,35 @@ from ..utils import hashing
 # atime is the last read access UNIX timestamp [s] or 0 if not implemented
 ItemInfo = namedtuple("ItemInfo", "name exists size directory atime", defaults=(0,))
 
+# type of a value given to store: a memoryview is accepted additionally to bytes,
+# so callers can avoid copying (e.g. give a slice of a big buffer they already have).
+StoreValue = bytes | memoryview
+
+
+def validate_value(value: StoreValue) -> StoreValue:
+    """Validate/normalize a value given to store.
+
+    bytes (and other bytes-like objects) are returned unchanged.
+    A memoryview is cast to a 1-dimensional view of bytes, so len(value) always
+    gives the number of bytes (even if the caller had a view with a bigger itemsize).
+    """
+    if isinstance(value, memoryview):
+        try:
+            return value.cast("B")
+        except TypeError:
+            # cast only works for C-contiguous views, but the backends need to
+            # write the value out as one consecutive sequence of bytes.
+            raise ValueError("value must be a C-contiguous memoryview") from None
+    return value
+
+
+def to_bytes(value: StoreValue) -> bytes:
+    """Get a bytes object for code that can not deal with a memoryview.
+
+    Note: this copies the data, except if it already is a bytes object.
+    """
+    return value if isinstance(value, bytes) else bytes(value)
+
 
 def validate_name(name):
     """Validate a backend key/name."""
@@ -108,8 +137,13 @@ class BackendBase(ABC):
         """
 
     @abstractmethod
-    def store(self, name: str, value: bytes) -> None:
-        """store <value> into <name>"""
+    def store(self, name: str, value: StoreValue) -> None:
+        """store <value> into <name>
+
+        <value> is either bytes or a memoryview of bytes (see StoreValue).
+        Backends must not keep a reference to a memoryview value after returning,
+        because the caller may reuse or release the underlying buffer.
+        """
 
     @abstractmethod
     def delete(self, name: str) -> None:
