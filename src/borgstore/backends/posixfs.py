@@ -2,7 +2,6 @@
 Filesystem-based backend implementation - uses files in directories below a base path.
 """
 
-import hashlib
 import os
 import re
 import sys
@@ -26,6 +25,7 @@ from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen
 from .errors import ObjectNotFound, PermissionDenied, QuotaExceeded
 from ..constants import TMP_SUFFIX, QUOTA_STORE_NAME, QUOTA_PERSIST_DELTA, QUOTA_PERSIST_INTERVAL
+from ..utils import hashing
 
 
 def get_file_backend(url, permissions=None, quota=None):
@@ -324,13 +324,10 @@ class PosixFS(BackendBase):
             raise BackendMustBeOpen()
         path = self._validate_join(name)
         self._check_permission(name, "r")
-        try:
-            hashlib.new(algorithm)
-        except ValueError:
-            raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
+        hashing.new(algorithm)  # validate the algorithm before opening the file
         try:
             with path.open("rb") as f:
-                h = hashlib.file_digest(f, algorithm)
+                h = hashing.file_digest(f, algorithm)
         except FileNotFoundError:
             raise ObjectNotFound(name) from None
         return h.hexdigest()

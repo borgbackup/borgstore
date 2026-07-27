@@ -10,6 +10,13 @@ try:
 except ImportError:
     pytest.skip("requests is not installed", allow_module_level=True)
 
+try:
+    from blake3 import blake3
+except ImportError:
+    blake3 = None
+
+blake3_is_available = blake3 is not None
+
 from borgstore.constants import DEL_SUFFIX
 from borgstore.server.rest import BorgStoreRESTServer
 from borgstore.backends.rest import get_rest_backend
@@ -286,6 +293,24 @@ def test_rest_server_hash(rest_server_with_auth):
         be.close()
 
 
+@pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
+def test_rest_server_hash_blake3(rest_server_with_auth):
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        data = b"hash me"
+        expected_hash = blake3(data).hexdigest()
+        be.store("test/item", data)
+        assert be.hash("test/item", algorithm="blake3") == expected_hash
+
+        # Test error for nonexistent object
+        with pytest.raises(ObjectNotFound):
+            be.hash("test/nonexistent", algorithm="blake3")
+    finally:
+        be.close()
+
+
 def test_rest_server_defrag(tmp_path):
     backend_url = tmp_path.as_uri()
     address, port = "127.0.0.1", 0
@@ -441,6 +466,24 @@ def test_rest_backend_defrag(rest_server_with_auth):
         assert res == nest("ns1/" + expected_hash, levels=1)
         assert be.load(res) == b"234fg"
 
+    finally:
+        be.close()
+
+
+@pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
+def test_rest_backend_defrag_blake3(rest_server_with_auth):
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        be.store("file1", b"0123456789")
+        be.store("file2", b"abcdefghij")
+
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        expected_hash = blake3(b"234fg").hexdigest()
+        res = be.defrag(sources, algorithm="blake3")
+        assert res == expected_hash
+        assert be.load(expected_hash) == b"234fg"
     finally:
         be.close()
 

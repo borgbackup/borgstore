@@ -11,6 +11,7 @@ from borgstore.backends.posixfs import PosixFS
 from .test_backends import get_sftp_test_backend, sftp_is_available  # noqa
 from .test_backends import get_rclone_test_backend, rclone_is_available  # noqa
 from .test_backends import get_s3_test_backend, s3_is_available  # noqa
+from .test_backends import blake3, blake3_is_available
 
 from borgstore.constants import ROOTNS
 from borgstore.store import Store, ItemInfo, ReadRangeError
@@ -128,6 +129,22 @@ def test_defrag_nested(posixfs_store_created):
         assert "requested 20 bytes" in str(exc_info.value)
 
 
+@pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
+def test_defrag_nested_blake3(posixfs_store_created):
+    ns = "two"  # nested! CONFIG has {"two/": {"levels": [2]}}
+    v1 = b"0123456789"
+    v2 = b"abcdefghij"
+    with posixfs_store_created as store:
+        store.store(ns + "/file1", v1)
+        store.store(ns + "/file2", v2)
+
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        expected_data = b"234fg"
+        res = store.defrag(sources, algorithm="blake3", namespace=ns)
+        assert res == blake3(expected_data).hexdigest()
+        assert store.load(ns + "/" + res) == expected_data
+
+
 def test_hash(posixfs_store_created):
     ns = "two"
     k0 = key(0)
@@ -146,6 +163,22 @@ def test_hash(posixfs_store_created):
         # Test unsupported algorithm
         with pytest.raises(ValueError, match="Unsupported hash algorithm"):
             store.hash(nsk0, algorithm="invalid_algo", deleted=True)
+
+
+@pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
+def test_hash_blake3(posixfs_store_created):
+    ns = "two"
+    k0 = key(0)
+    v0 = b"value0"
+    nsk0 = ns + "/" + k0
+    expected_hash = blake3(v0).hexdigest()
+    with posixfs_store_created as store:
+        store.store(nsk0, v0)
+        assert store.hash(nsk0, algorithm="blake3") == expected_hash
+
+        # Test with soft-deletion
+        store.move(nsk0, delete=True)
+        assert store.hash(nsk0, algorithm="blake3", deleted=True) == expected_hash
 
 
 @pytest.mark.parametrize("namespace,count", [("zero", 100), ("one", 1000)])

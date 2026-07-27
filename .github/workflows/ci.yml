@@ -202,13 +202,13 @@ jobs:
         pip install -r requirements.d/dev.txt
     - name: Install borgstore (Linux)
       if: runner.os == 'Linux'
-      run: pip install -ve ".[s3,sftp,rest,rclone]"
+      run: pip install -ve ".[s3,sftp,rest,rclone,blake3]"
     - name: Install borgstore (Windows)
       if: runner.os == 'Windows'
-      run: pip install -ve ".[rest]"
+      run: pip install -ve ".[rest,blake3]"
     - name: Install borgstore (macOS)
       if: runner.os == 'macOS'
-      run: pip install -ve ".[rest,rclone]"
+      run: pip install -ve ".[rest,rclone,blake3]"
     - name: run tox envs
       run: tox -e ${{ matrix.toxenv }}
     - name: Display diagnostics on failure

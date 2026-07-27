@@ -16,10 +16,15 @@ API can be much simpler:
   an offset and/or size are supported.
 - info: get information about an item via its key (exists, size, ...).
 - hash: computes the hexdigest for the content of an item (given its key).
+  Supported algorithms are all algorithms supported by ``hashlib`` (e.g.
+  "sha256", the default) and also "blake3" (requires the optional ``blake3``
+  package, see :doc:`installation`).
 - delete: immediately remove an item from the store (given its key).
 - move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
-- defrag: general purpose defragmentation helper (copies blocks to new items)
+- defrag: general purpose defragmentation helper (copies blocks to new items).
+  If the target name is computed from the content, the same algorithms as for
+  hash are supported.
 - quota: return quota limit and usage (-1 if quotas not enabled or not supported)
 - stats: API call counters, time spent in API methods, data volume/throughput.
 - latency/bandwidth emulator: see :ref:`store-latency-bandwidth-emulator`.

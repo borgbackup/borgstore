@@ -633,6 +633,13 @@ class Store:
                     yield info
 
     def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
+        """
+        compute the hex digest of the content of item <name> using <algorithm>.
+
+        algorithm can be any algorithm supported by hashlib (e.g. "sha256") or "blake3".
+        blake3 needs the optional "blake3" package to be installed - for backends that
+        compute the hash remotely, it must be installed on the server side.
+        """
         with self._stats_updater("hash", f"hash({name!r}, algorithm={algorithm!r}, deleted={deleted})"):
             return self._backend_call(
                 lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
@@ -647,7 +654,8 @@ class Store:
         in order of appearance in the list and their contents will be appended to the target item.
 
         if the target name is not given, algorithm must be given to compute the target name
-        as hash(algorithm, target_content).hexdigest().
+        as hash(algorithm, target_content).hexdigest(). the supported algorithms are the same
+        as for the hash method, see there.
 
         returns the target name.
         """

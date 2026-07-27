@@ -19,6 +19,13 @@ try:
 except ImportError:
     requests = None
 
+try:
+    from blake3 import blake3
+except ImportError:
+    blake3 = None
+
+blake3_is_available = blake3 is not None
+
 from borgstore.backends._base import ItemInfo
 from borgstore.backends.errors import (
     BackendAlreadyExists,
@@ -731,6 +738,26 @@ def test_hash(tested_backends, request):
     # Test must be open
     with pytest.raises(BackendMustBeOpen):
         backend.hash("test/item")
+
+
+@pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
+def test_hash_blake3(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    with backend:
+        data = b"hash me"
+        expected_hash = blake3(data).hexdigest()
+        backend.store("test/item", data)
+        assert backend.hash("test/item", algorithm="blake3") == expected_hash
+
+        # Large-ish data to test chunking
+        large_data = b"a" * (2 * 1024 * 1024)
+        expected_large_hash = blake3(large_data).hexdigest()
+        backend.store("test/large_item", large_data)
+        assert backend.hash("test/large_item", algorithm="blake3") == expected_large_hash
+
+        # Test error for nonexistent object
+        with pytest.raises(ObjectNotFound):
+            backend.hash("test/nonexistent", algorithm="blake3")
 
 
 @pytest.mark.skipif(not (rest1_is_available and rest2_is_available), reason="REST1 and REST2 backends not available")

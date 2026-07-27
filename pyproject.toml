@@ -37,6 +37,9 @@ sftp = [
 s3 = [
     "boto3",
 ]
+blake3 = [
+    "blake3 >= 1.0",  # optional "blake3" hash algorithm support for hash computations
+]
 none = []
 
 [project.scripts]
