@@ -1,6 +1,18 @@
 Changelog
 =========
 
+Version 0.5.6 (not released yet)
+--------------------------------
+
+New features:
+
+- hash / defrag: support the "blake3" algorithm (in addition to all hashlib algorithms).
+  Needs the optional "blake3" package: pip install 'borgstore[blake3]'.
+  For backends that hash server-side, it needs to be installed on the server.
+  Note: sftp always computes blake3 client-side, because the SFTP "check-file"
+  extension does not support blake3.
+
+
 Version 0.5.5 (2026-07-10)
 --------------------------
 

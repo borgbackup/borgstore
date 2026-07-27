@@ -4,12 +4,12 @@ Base class and type definitions for all backend implementations in this package.
 Docs that are not backend-specific are also found here.
 """
 
-import hashlib
 from abc import ABC, abstractmethod
 from collections import namedtuple
 from typing import Iterator
 
 from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX, HID_SUFFIX
+from ..utils import hashing
 
 # atime is the last read access UNIX timestamp [s] or 0 if not implemented
 ItemInfo = namedtuple("ItemInfo", "name exists size directory atime", defaults=(0,))
@@ -126,6 +126,9 @@ class BackendBase(ABC):
         - source and target item names are with namespace.
         - if levels > 0, source and target item names are nested.
 
+        <algorithm> can be any algorithm supported by hashlib or "blake3"
+        (the latter requires the optional "blake3" package).
+
         Returns the target item name.
         """
         # default implementation: slow, but works for all backends.
@@ -145,10 +148,7 @@ class BackendBase(ABC):
         if target is None:
             if algorithm is None:
                 raise ValueError("Either target or algorithm must be given for defrag")
-            try:
-                h = hashlib.new(algorithm)
-            except (ValueError, TypeError):
-                raise ValueError(f"Unsupported hash algorithm: {algorithm}")
+            h = hashing.new(algorithm)
             h.update(data)
             target = h.hexdigest()
             if namespace:
@@ -159,13 +159,14 @@ class BackendBase(ABC):
         return target
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:
-        """compute full-file hex digest of <name> content using <algorithm>"""
+        """compute full-file hex digest of <name> content using <algorithm>
+
+        <algorithm> can be any algorithm supported by hashlib or "blake3"
+        (the latter requires the optional "blake3" package).
+        """
         # default implementation: slow, but works for all backends.
         # might be overridden for performance.
-        try:
-            h = hashlib.new(algorithm)
-        except ValueError:
-            raise ValueError(f"Unsupported hash algorithm: {algorithm}") from None
+        h = hashing.new(algorithm)
         h.update(self.load(name))
         return h.hexdigest()
 

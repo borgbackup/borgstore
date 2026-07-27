@@ -39,7 +39,7 @@ Backend features
 - new backends are simple to implement
 - key validation
 - partial loads / range requests
-- stored object hashing
+- stored object hashing (hashlib algorithms, e.g. sha256, and optionally blake3)
 - stored object defragmentation
 - quota support (only `posixfs`)
 - permissions checking (only `posixfs`)

@@ -116,6 +116,7 @@ Use storage on an SFTP server:
 - Namespaces: directories
 - Values: in key-named files
 - hash: runs the hexdigest computation server-side (if server supports check-file).
+  "blake3" is not part of the check-file extension, so it is always computed client-side.
 
 rclone
 ------
@@ -168,6 +169,7 @@ Use a storage backend running inside a BorgStore REST server process:
 - Namespaces: depends on backend used by the server
 - Values: depends on backend used by the server
 - Authentication: Optional Basic Auth is supported.
-- hash: runs the hexdigest computation server-side.
+- hash: runs the hexdigest computation server-side. Using algorithm "blake3" requires
+  the optional ``blake3`` package to be installed **on the server**.
 - defrag: runs the defragmentation helper server-side.
 - atime: supported (if backend used by server supports it).

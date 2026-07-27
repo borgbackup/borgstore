@@ -23,6 +23,7 @@ from ._base import BackendBase, ItemInfo, validate_name
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
 from ..constants import TMP_SUFFIX
+from ..utils import hashing
 
 logger = logging.getLogger(__name__)
 
@@ -470,6 +471,10 @@ class Sftp(BackendBase):
     def _sftp_hash(self, name: str, algorithm: str) -> str | None:
         # Sadly, as of 2026-03-28, this is not supported by OpenSSH,
         # but by some less popular SFTP servers.
+        if algorithm == hashing.BLAKE3:
+            # the check-file extension only defines md5 / sha* algorithms. asking for blake3
+            # would just fail and, worse, make us give up on check-file for all later calls.
+            return None
         if self.check_file_supported:
             try:
                 with self.client.open(name) as f:
