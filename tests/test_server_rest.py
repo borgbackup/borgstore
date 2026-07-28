@@ -59,6 +59,22 @@ def rest_server_with_auth(tmp_path):
     server.server_close()
 
 
+def test_rest_server_store_memoryview(rest_server_with_auth):
+    # the rest backend sends a memoryview as request body and also computes the
+    # X-Content-hash-sha256 header from it, so the server must see the same data.
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        buffer = bytearray(b"0123456789" * 1000)
+        value = memoryview(buffer)[10:9000]
+        be.store("test/item", value)
+        assert be.load("test/item") == bytes(value)
+        assert be.info("test/item").size == 8990
+    finally:
+        be.close()
+
+
 def test_rest_server_basic_ops(rest_server_with_auth):
     be = rest_server_with_auth
     be.create()

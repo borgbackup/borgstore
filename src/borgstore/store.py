@@ -19,7 +19,7 @@ import time
 from typing import Iterator, NamedTuple, Optional
 
 from .utils.nesting import nest, unnest
-from .backends._base import ItemInfo, BackendBase
+from .backends._base import ItemInfo, BackendBase, StoreValue, validate_value
 from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid, ReadRangeError  # noqa
 from .backends.posixfs import get_file_backend
 from .backends.rclone import get_rclone_backend
@@ -433,7 +433,7 @@ class Store:
             self._stats_update_volume("load", len(result))
             return result
 
-    def _cache_store(self, nested_name: str, value: bytes) -> None:
+    def _cache_store(self, nested_name: str, value: StoreValue) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
         self._stats["cache_store_calls"] += 1
@@ -444,10 +444,19 @@ class Store:
             logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
 
-    def store(self, name: str, value: bytes) -> None:
+    def store(self, name: str, value: StoreValue) -> None:
+        """
+        store <value> into item <name>.
+
+        <value> is either bytes or a memoryview of bytes - a memoryview enables callers
+        to avoid copying (e.g. by giving a slice of a bigger buffer they already have).
+        The value is only used while this method runs, so the caller may reuse or
+        release the underlying buffer afterwards.
+        """
         # note: using .find here will:
         # - overwrite an existing item (level stays same)
         # - write to the last level if no existing item is found.
+        value = validate_value(value)  # normalize, so len(value) is the number of bytes
         with self._stats_updater("store", f"store({name!r})"):
             nested_name = self.find(name)
             self._backend_call(lambda: self.backend.store(nested_name, value), key="store", volume=len(value))

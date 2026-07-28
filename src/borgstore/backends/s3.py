@@ -12,7 +12,7 @@ import re
 from typing import Optional
 import urllib.parse
 
-from ._base import BackendBase, ItemInfo, validate_name
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, to_bytes
 from ._utils import make_range_header
 from .errors import BackendError, BackendMustBeOpen, BackendMustNotBeOpen, BackendDoesNotExist, BackendAlreadyExists
 from .errors import ObjectNotFound
@@ -179,6 +179,8 @@ class S3(BackendBase):
         if not self.opened:
             raise BackendMustBeOpen()
         validate_name(name)
+        # botocore rejects a memoryview Body (parameter validation), so we need a copy.
+        value = to_bytes(validate_value(value))
         key = self.base_path + name
         self.s3.put_object(Bucket=self.bucket, Key=key, Body=value)
 

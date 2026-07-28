@@ -11,6 +11,11 @@ New features:
   For backends that hash server-side, it needs to be installed on the server.
   Note: sftp always computes blake3 client-side, because the SFTP "check-file"
   extension does not support blake3.
+- store: accept a memoryview value additionally to bytes, #200.
+  This enables callers to avoid copying, e.g. by giving a slice of a bigger
+  buffer they already have. posixfs, rest and rclone store it without copying,
+  sftp and s3 internally create a bytes object first, because paramiko / boto3
+  do not accept a memoryview.
 
 
 Version 0.5.5 (2026-07-10)

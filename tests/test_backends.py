@@ -2,6 +2,7 @@
 Generic tests for the backend implementations.
 """
 
+import array
 import hashlib
 import os
 import sys
@@ -37,7 +38,7 @@ from borgstore.backends.errors import (
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
 from borgstore.backends.rclone import get_rclone_backend
-from borgstore.backends.s3 import S3, get_s3_backend
+from borgstore.backends.s3 import S3, boto3, get_s3_backend
 from borgstore.backends.rest import REST, get_rest_backend
 from borgstore.constants import ROOTNS
 
@@ -562,6 +563,79 @@ def test_scalability_size(tested_backends, exp, request):
         key, value = "key", bytes(size)
         backend.store(key, value)
         assert backend.load(key) == value
+
+
+def test_store_memoryview(tested_backends, request):
+    with get_backend_from_fixture(tested_backends, request) as backend:
+        # a memoryview of a slice of a bigger buffer (that's what callers use to avoid copies)
+        buffer = bytearray(b"0123456789" * 10)
+        value = memoryview(buffer)[10:30]
+        backend.store("key", value)
+        assert backend.load("key") == bytes(value)
+
+        # a memoryview with itemsize > 1: we store the bytes it consists of
+        array_value = array.array("I", range(16))  # itemsize 4
+        backend.store("key_array", memoryview(array_value))
+        assert backend.load("key_array") == array_value.tobytes()
+
+        # empty memoryview
+        backend.store("key_empty", memoryview(b""))
+        assert backend.load("key_empty") == b""
+
+        # a non-contiguous memoryview can not be stored (we would have to copy it first)
+        with pytest.raises(ValueError, match="C-contiguous"):
+            backend.store("key_invalid", memoryview(buffer)[::2])
+
+
+def test_sftp_store_memoryview_gives_bytes_to_paramiko():
+    # paramiko can not deal with a memoryview, so the sftp backend must convert it.
+    written = []
+
+    class FakeFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def set_pipelined(self, pipelined):
+            pass
+
+        def write(self, data):
+            written.append(data)
+
+    class FakeClient:
+        def open(self, name, mode):
+            return FakeFile()
+
+        def posix_rename(self, curr_name, new_name):
+            pass
+
+    backend = Sftp(hostname="localhost", path="/some/path")
+    backend.opened = True
+    backend.client = FakeClient()
+    buffer = bytearray(b"0123456789" * 10)
+    backend.store("key", memoryview(buffer)[10:30])
+    assert written == [b"0123456789" * 2]
+    assert type(written[0]) is bytes
+
+
+@pytest.mark.skipif(boto3 is None, reason="boto3 is not installed")
+def test_s3_store_memoryview_gives_bytes_to_boto3():
+    # boto3 rejects a memoryview Body (parameter validation), so the s3 backend must convert it.
+    put_objects = []
+
+    class FakeS3:
+        def put_object(self, **kwargs):
+            put_objects.append(kwargs)
+
+    backend = S3(bucket="bucket", path="/path", is_b2=False)
+    backend.opened = True
+    backend.s3 = FakeS3()
+    buffer = bytearray(b"0123456789" * 10)
+    backend.store("key", memoryview(buffer)[10:30])
+    assert put_objects[0]["Body"] == b"0123456789" * 2
+    assert type(put_objects[0]["Body"]) is bytes
 
 
 def test_load_partial(tested_backends, request):

@@ -112,10 +112,37 @@ Please note:
    can't add another namespace later, because that would create
    nested namespaces.
 
+.. _store-values:
+
 Values
 ------
 
-Values can be any arbitrary binary data (bytes).
+Values can be any arbitrary binary data.
+
+``store(name, value)`` accepts the value either as ``bytes`` or as a
+``memoryview`` of bytes, so a caller that already has the data inside a bigger
+buffer can avoid copying it:
+
+.. code-block:: python
+
+    buffer = bytearray(...)  # e.g. a big buffer, filled with multiple objects
+    store.store("data/0123456789abcdef", memoryview(buffer)[offset : offset + size])
+
+Notes about ``memoryview`` values:
+
+- The view must be C-contiguous (a plain slice of a buffer is). Otherwise, a
+  ``ValueError`` is raised - the value must be storable as one consecutive
+  sequence of bytes.
+- If the view has an itemsize > 1 (e.g. a view of an ``array.array("I", ...)``),
+  the bytes it consists of are stored, so the stored size is
+  ``len(value) * value.itemsize``.
+- The value is only used while ``store`` runs. Afterwards, the caller may reuse
+  or release the underlying buffer.
+- Not all backends can hand a ``memoryview`` to the library they use: ``posixfs``,
+  ``rest`` and ``rclone`` store it without copying, ``sftp`` and ``s3`` internally
+  create a ``bytes`` object (one copy) first.
+
+Loading always gives ``bytes``.
 
 Automatic Nesting
 -----------------

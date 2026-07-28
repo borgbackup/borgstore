@@ -2,6 +2,7 @@
 Tests for the high-level Store API.
 """
 
+import array
 import hashlib
 import pytest
 
@@ -99,6 +100,32 @@ def test_basics(posixfs_store_created):
 
         assert list(store.list(ns)) == []
         assert store.stats["backend_delete_calls"] == 1
+
+
+def test_store_memoryview(posixfs_store_created):
+    ns = "two"
+    with posixfs_store_created as store:
+        # a memoryview of a slice of a bigger buffer (that's what callers use to avoid copies)
+        buffer = bytearray(b"0123456789" * 10)
+        value = memoryview(buffer)[10:30]
+        store.store(ns + "/" + key(0), value)
+        assert store.load(ns + "/" + key(0)) == bytes(value)
+        assert store.info(ns + "/" + key(0)).size == 20
+
+        # the caller may reuse/modify its buffer afterwards, the stored value must not change.
+        buffer[10:30] = b"x" * 20
+        assert store.load(ns + "/" + key(0)) == b"0123456789" * 2
+
+        # a memoryview with itemsize > 1: we store the bytes it consists of and
+        # the stats volume is the number of bytes (not the number of items).
+        array_value = array.array("I", range(16))  # itemsize 4
+        store.store(ns + "/" + key(1), memoryview(array_value))
+        assert store.load(ns + "/" + key(1)) == array_value.tobytes()
+        assert store.stats["store_volume"] == 20 + 64
+
+        # a non-contiguous memoryview can not be stored (we would have to copy it first)
+        with pytest.raises(ValueError, match="C-contiguous"):
+            store.store(ns + "/" + key(2), memoryview(buffer)[::2])
 
 
 def test_defrag_nested(posixfs_store_created):
