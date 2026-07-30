@@ -17,6 +17,12 @@ New features:
   sftp and s3 internally create a bytes object first, because paramiko / boto3
   do not accept a memoryview.
 
+Fixes:
+
+- docs: build the docs also if borgstore is not installed, #204.
+  conf.py now falls back to the setuptools_scm generated src/borgstore/_version.py
+  and, if that is not there either, to an empty version.
+
 
 Version 0.5.5 (2026-07-10)
 --------------------------
