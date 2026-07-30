@@ -6,12 +6,32 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-from importlib.metadata import version as pkg_version
+import os
+import sys
+from importlib.metadata import PackageNotFoundError, version as pkg_version
+
+
+def get_release():
+    """Determine the borgstore version, without requiring borgstore to be installed."""
+    try:
+        return pkg_version("borgstore")
+    except PackageNotFoundError:
+        pass
+    # not installed - maybe we are in a source tree where setuptools_scm already generated _version.py.
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+    try:
+        from borgstore._version import version  # noqa
+
+        return version
+    except ImportError:
+        # neither installed nor built - the docs do not really need the version, so just go on without it.
+        return ""
+
 
 project = "BorgStore"
 copyright = "2026, Thomas Waldmann"
 author = "Thomas Waldmann"
-release = pkg_version("borgstore")
+release = get_release()
 version = ".".join(release.split(".")[:2])
 
 # -- General configuration ---------------------------------------------------
