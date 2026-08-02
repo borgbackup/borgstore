@@ -14,7 +14,7 @@ from ..utils import hashing
 # atime is the last read access UNIX timestamp [s] or 0 if not implemented
 ItemInfo = namedtuple("ItemInfo", "name exists size directory atime", defaults=(0,))
 
-# type of a value given to store: a memoryview is accepted additionally to bytes,
+# type of a value given to store: a memoryview is accepted in addition to bytes,
 # so callers can avoid copying (e.g. give a slice of a big buffer they already have).
 StoreValue = bytes | memoryview
 
