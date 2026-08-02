@@ -1,41 +1,23 @@
 Changelog
 =========
 
-Version 0.5.6 (not released yet)
---------------------------------
+Version 0.6.0 (2026-08-02)
+--------------------------
 
 New features:
 
-- Store: thread safety, #206. A Store instance can now be shared between threads:
-  all operations are serialized by an internal lock, so the backend (e.g. one
-  sftp/rest session) and the store's own bookkeeping (stats, cache) never see
-  concurrent calls. list() stays a lazy generator: the lock is only held while
-  fetching the next item, so other threads' operations interleave with a long
-  listing. Serialization is per operation; multi-operation atomicity remains the
-  caller's responsibility. This enables callers like borg to call into the store
-  from a background thread (e.g. borgbackup/borg#9988's pack store-thread).
+- Store: thread safety - a Store instance can now be shared between threads, #206
 - hash / defrag: support the "blake3" algorithm (in addition to all hashlib algorithms).
   Needs the optional "blake3" package: pip install 'borgstore[blake3]'.
-  For backends that hash server-side, it needs to be installed on the server.
-  Note: sftp always computes blake3 client-side, because the SFTP "check-file"
-  extension does not support blake3.
-- store: accept a memoryview value additionally to bytes, #200.
-  This enables callers to avoid copying, e.g. by giving a slice of a bigger
-  buffer they already have. posixfs, rest and rclone store it without copying,
-  sftp and s3 internally create a bytes object first, because paramiko / boto3
-  do not accept a memoryview.
+- store: accept a memoryview value in addition to bytes, #200
 
 Fixes:
 
-- docs: build the docs also if borgstore is not installed, #204.
-  conf.py now falls back to the setuptools_scm generated src/borgstore/_version.py
-  and, if that is not there either, to an empty version.
+- docs: build the docs even if borgstore is not installed, #204
 
 Other changes:
 
-- add support for Python 3.15: classifier, tox py315 env and a CI job running
-  the test suite on 3.15-dev. As 3.15 is not released yet, that CI job is
-  allowed to fail.
+- add testing for Python 3.15 (note: blake3 1.0.8 does not build with 3.15)
 
 
 Version 0.5.5 (2026-07-10)
