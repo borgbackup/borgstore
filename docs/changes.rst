@@ -6,6 +6,14 @@ Version 0.5.6 (not released yet)
 
 New features:
 
+- Store: thread safety, #206. A Store instance can now be shared between threads:
+  all operations are serialized by an internal lock, so the backend (e.g. one
+  sftp/rest session) and the store's own bookkeeping (stats, cache) never see
+  concurrent calls. list() stays a lazy generator: the lock is only held while
+  fetching the next item, so other threads' operations interleave with a long
+  listing. Serialization is per operation; multi-operation atomicity remains the
+  caller's responsibility. This enables callers like borg to call into the store
+  from a background thread (e.g. borgbackup/borg#9988's pack store-thread).
 - hash / defrag: support the "blake3" algorithm (in addition to all hashlib algorithms).
   Needs the optional "blake3" package: pip install 'borgstore[blake3]'.
   For backends that hash server-side, it needs to be installed on the server.

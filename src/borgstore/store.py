@@ -7,14 +7,17 @@ The Store uses a backend to store key/value data and adds some functionality:
 - configurable nesting
 - recursive list method
 - soft deletion
+- thread safety (one operation at a time, see Store docstring)
 """
 
 from binascii import hexlify
 from collections import Counter
 from contextlib import contextmanager
 import enum
+from functools import wraps
 import logging
 import os
+import threading
 import time
 from typing import Iterator, NamedTuple, Optional
 
@@ -83,7 +86,31 @@ def get_backend(url, permissions=None, quota=None):
         return backend
 
 
+def _locked(method):
+    """Decorator: run the Store method while holding the store's lock, see Store docstring."""
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Store:
+    """
+    High-level key/value store, using a backend for the actual storage.
+
+    Thread safety: a Store instance may be shared between threads, all operations are
+    serialized by an internal lock (backends and the Store's own bookkeeping - stats,
+    cache - are not thread-safe themselves, e.g. one sftp/rest session), #206.
+    list() is special: it stays a lazy generator, the lock is only held while fetching
+    the next item, so other threads' operations can interleave with a long listing
+    (and the listing thread itself can do store operations inside its loop).
+    Serialization is per operation - multi-operation sequences that need to be atomic
+    against other threads must be coordinated by the caller.
+    """
+
     def __init__(
         self,
         url: Optional[str] = None,
@@ -94,6 +121,10 @@ class Store:
         cache_url: Optional[str] = None,
         cache_backend: Optional[BackendBase] = None,
     ):
+        # serializes all operations of this store, see the class docstring.
+        # reentrant, because operations nest (e.g. create_levels uses "with self:",
+        # load/store/... call find).  created first: some @_locked methods run in __init__.
+        self._lock = threading.RLock()
         self.url = url
         if backend is None and url is not None:
             backend = get_backend(url, permissions=permissions)
@@ -176,6 +207,7 @@ class Store:
                 return policy
         return CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
 
+    @_locked
     def set_levels(self, levels: dict, create: bool = False) -> None:
         if not levels or not isinstance(levels, dict):
             raise ValueError("No or invalid levels configuration given.")
@@ -184,6 +216,7 @@ class Store:
         if create:
             self.create_levels()
 
+    @_locked
     def create_levels(self):
         """creating any needed namespaces / directory in advance"""
         # doing that saves a lot of ad-hoc mkdir calls, which is especially important
@@ -216,6 +249,7 @@ class Store:
                 else:
                     raise ValueError(f"Invalid levels: {namespace}: {levels}")
 
+    @_locked
     def create(self) -> None:
         self.backend.create()
         if self.cache_backend is not None and not self._cache_disabled:
@@ -223,6 +257,7 @@ class Store:
         if self.backend.precreate_dirs:
             self.create_levels()
 
+    @_locked
     def destroy(self) -> None:
         self.backend.destroy()
         if self.cache_backend is not None:
@@ -236,6 +271,7 @@ class Store:
         self.close()
         return False
 
+    @_locked
     def open(self) -> None:
         self.backend.open()
         if self.cache_backend is not None and not self._cache_disabled:
@@ -247,6 +283,7 @@ class Store:
             else:
                 self._cache_cleanup_expired()
 
+    @_locked
     def close(self) -> None:
         self.backend.close()
         if self.cache_backend is not None:
@@ -257,6 +294,7 @@ class Store:
             except Exception as err:
                 logger.warning(f"borgstore: cache close failed: {err!r}")
 
+    @_locked
     def quota(self) -> dict:
         return self.backend.quota()
 
@@ -298,6 +336,7 @@ class Store:
         return self._stats.get(f"{key}_volume", 0)
 
     @property
+    @_locked
     def stats(self):
         """
         Return statistics such as method call counters, overall time [s], overall data volume, and overall throughput.
@@ -347,6 +386,7 @@ class Store:
         # Store.create_levels requires all namespaces to be configured in self.levels.
         raise KeyError(f"no matching namespace found for: {name}")
 
+    @_locked
     def find(self, name: str, *, deleted=False) -> str:
         """
         Find an item checking all supported nesting levels and return its nested name:
@@ -376,6 +416,7 @@ class Store:
                     break
         return nested_name
 
+    @_locked
     def info(self, name: str, *, deleted=False) -> ItemInfo:
         with self._stats_updater("info", f"info({name!r}, deleted={deleted})"):
             return self._backend_call(lambda: self.backend.info(self.find(name, deleted=deleted)), volume=0)
@@ -397,6 +438,7 @@ class Store:
         self._stats["cache_load_volume"] += len(value)
         return value
 
+    @_locked
     def load(self, name: str, *, size=None, offset=0, deleted=False) -> bytes:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
@@ -444,6 +486,7 @@ class Store:
             logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
 
+    @_locked
     def store(self, name: str, value: StoreValue) -> None:
         """
         store <value> into item <name>.
@@ -476,6 +519,7 @@ class Store:
             logger.warning(f"borgstore: cache delete failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
 
+    @_locked
     def delete(self, name: str, *, deleted=False) -> None:
         """
         Really and immediately deletes an item.
@@ -488,6 +532,7 @@ class Store:
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_delete(nested_name)
 
+    @_locked
     def cache_invalidate(self, name: str, *, deleted: bool = False) -> None:
         """
         Invalidate cached items.
@@ -534,6 +579,7 @@ class Store:
             logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
             self._stats["cache_errors"] += 1
 
+    @_locked
     def move(
         self,
         name: str,
@@ -596,13 +642,24 @@ class Store:
         Note: list bypasses the cache and always queries the primary backend to ensure we
         only return items that really exist there, even if other clients have updated or
         deleted items directly in the primary backend.
+
+        Note: the store's lock is only held while fetching the next item, not across the
+        whole iteration, so other threads' operations (and the iterating thread's own
+        operations inside its loop) interleave with a long listing, see the class docstring.
         """
         # we need this wrapper due to the recursion - we only want to increment list_calls once:
         logger.debug(f"borgstore: list_start({name!r}, deleted={deleted})")
-        self._stats["list_calls"] += 1
+        with self._lock:
+            self._stats["list_calls"] += 1
+            inner = self._list(name, deleted=deleted)
         count = 0
         try:
-            for info in self._list(name, deleted=deleted):
+            while True:
+                with self._lock:
+                    try:
+                        info = next(inner)
+                    except StopIteration:
+                        break
                 count += 1
                 yield info
         finally:
@@ -641,6 +698,7 @@ class Store:
                 elif not deleted and not is_deleted:
                     yield info
 
+    @_locked
     def hash(self, name: str, algorithm: str = "sha256", *, deleted: bool = False) -> str:
         """
         compute the hex digest of the content of item <name> using <algorithm>.
@@ -654,6 +712,7 @@ class Store:
                 lambda: self.backend.hash(self.find(name, deleted=deleted), algorithm=algorithm), volume=0
             )
 
+    @_locked
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
         """
         efficiently create a new item (target) by combining blocks from existing items (sources)
