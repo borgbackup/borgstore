@@ -31,6 +31,12 @@ Fixes:
   conf.py now falls back to the setuptools_scm generated src/borgstore/_version.py
   and, if that is not there either, to an empty version.
 
+Other changes:
+
+- add support for Python 3.15: classifier, tox py315 env and a CI job running
+  the test suite on 3.15-dev. As 3.15 is not released yet, that CI job is
+  allowed to fail.
+
 
 Version 0.5.5 (2026-07-10)
 --------------------------
