@@ -39,7 +39,9 @@ s3 = [
     "boto3",
 ]
 blake3 = [
-    "blake3 >= 1.0",  # optional "blake3" hash algorithm support for hash computations
+    # optional "blake3" hash algorithm support for hash computations
+    "blake3 >= 1.0; sys_platform != 'win32'",
+    "blake3 >= 1.0,!=1.0.9; sys_platform == 'win32'",  # 1.0.9 does not build on windows/msys2/mingw
 ]
 none = []
 
