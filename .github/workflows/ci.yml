@@ -49,6 +49,12 @@ jobs:
             - os: ubuntu-latest
               python-version: '3.14'
               toxenv: py314
+            - os: ubuntu-latest
+              python-version: '3.15-dev'
+              toxenv: py315
+              # 3.15 is not released yet, so do not fail the whole matrix if it
+              # (or a dependency not having wheels for it yet) breaks.
+              allow-failure: true
             - os: macos-latest
               python-version: '3.12'
               toxenv: py312
