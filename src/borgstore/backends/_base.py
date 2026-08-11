@@ -11,8 +11,11 @@ from typing import Iterator
 from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX, HID_SUFFIX
 from ..utils import hashing
 
-# atime is the last read access UNIX timestamp [s] or 0 if not implemented
-ItemInfo = namedtuple("ItemInfo", "name exists size directory atime", defaults=(0,))
+# atime is the last read access UNIX timestamp [s] or 0 if not implemented.
+# mtime is the last modification UNIX timestamp [s] or 0 if not implemented - it must be
+# stamped by the *storage side's* clock; backends that would only echo a client-supplied
+# timestamp (e.g. rclone) must report 0 (unknown) instead.
+ItemInfo = namedtuple("ItemInfo", "name exists size directory atime mtime", defaults=(0, 0))
 
 # type of a value given to store: a memoryview is accepted in addition to bytes,
 # so callers can avoid copying (e.g. give a slice of a big buffer they already have).

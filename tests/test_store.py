@@ -4,6 +4,8 @@ Tests for the high-level Store API.
 
 import array
 import hashlib
+import time
+
 import pytest
 
 from . import key, list_store_names, list_store_names_sorted
@@ -90,6 +92,9 @@ def test_basics(posixfs_store_created):
         assert items[0].size == len(v0)
         assert not items[0].directory
         assert items[0].atime >= 0
+        # posixfs: mtime is the (local) filesystem clock at store() time
+        assert abs(items[0].mtime - time.time()) < 120
+        assert abs(store.info(nsk0).mtime - time.time()) < 120
 
         store.delete(nsk0)
 

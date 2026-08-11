@@ -699,12 +699,14 @@ def test_rest_server_stdio(tmp_path):
         assert status == 200
         items = json.loads(body.decode("utf-8"))
         assert any(item["name"] == "item1" and item.get("atime", 0) > 0 for item in items)
+        assert any(item["name"] == "item1" and item.get("mtime", 0) > 0 for item in items)
 
         # 4. Info (HEAD)
         status, body, headers = do_request("HEAD", "/item1")
         assert status == 200
         assert body == b""
         assert float(headers.get("X-BorgStore-Atime", 0)) > 0
+        assert float(headers.get("X-BorgStore-Mtime", 0)) > 0
 
         # 5. Info for nonexistent (HEAD)
         status, body, headers = do_request("HEAD", "/nonexistent")
@@ -740,12 +742,14 @@ def test_rest_url(tmp_path):
         assert info.exists
         assert info.size == len(item_data)
         assert info.atime > 0
+        assert info.mtime > 0
 
         # Test listing
         items = list(store.list(""))
         assert len(items) == 1
         assert items[0].name == item_name
         assert items[0].atime > 0
+        assert items[0].mtime > 0
 
         # Test nonexistent item
         # This also used to hang if it returned a 404 with a body.

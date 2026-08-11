@@ -526,8 +526,9 @@ class REST(BackendBase):
         exists = response.status_code == HTTP.OK
         is_dir = response.headers.get("X-BorgStore-Is-Directory") == "true"
         atime = float(response.headers.get("X-BorgStore-Atime", 0))
+        mtime = float(response.headers.get("X-BorgStore-Mtime", 0))  # 0: old server without mtime support
         size = int(response.headers.get("Content-Length", 0)) if exists else 0
-        return ItemInfo(name=name, exists=exists, size=size, directory=is_dir, atime=atime)
+        return ItemInfo(name=name, exists=exists, size=size, directory=is_dir, atime=atime, mtime=mtime)
 
     @with_reconnect
     def load(self, name: str, *, size=None, offset=0) -> bytes:
@@ -633,4 +634,5 @@ class REST(BackendBase):
                 size=entry["size"],
                 directory=entry.get("directory", False),
                 atime=entry.get("atime", 0),
+                mtime=entry.get("mtime", 0),  # 0: old server without mtime support
             )

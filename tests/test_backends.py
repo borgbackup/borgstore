@@ -540,6 +540,9 @@ def test_list(tested_backends, request):
         assert matching_k1[0].exists and not matching_k1[0].directory and matching_k1[0].size == len(v1)
         assert matching_k0[0].atime >= 0
         assert matching_k1[0].atime >= 0
+        # mtime is 0 for backends that can not provide a storage-side timestamp (e.g. rclone)
+        assert matching_k0[0].mtime >= 0
+        assert matching_k1[0].mtime >= 0
         # for "dir", we do not know what size the backend has returned.
         # that is rather OS / fs / backend specific.
         matching_items = [item for item in items if item.name == "dir"]

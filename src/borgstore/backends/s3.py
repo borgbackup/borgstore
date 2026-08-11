@@ -273,7 +273,13 @@ class S3(BackendBase):
                         pass  # that file is likely not from us or is still uploading
                     else:
                         start_after = obj["Key"]
-                        yield ItemInfo(name=obj_name, exists=True, size=obj["Size"], directory=False)
+                        yield ItemInfo(
+                            name=obj_name,
+                            exists=True,
+                            size=obj["Size"],
+                            directory=False,
+                            mtime=obj["LastModified"].timestamp(),
+                        )
                 for prefix in objects.get("CommonPrefixes", []):
                     dir_name = prefix["Prefix"][len(base_prefix) : -1]  # Remove base_path prefix and trailing slash
                     yield ItemInfo(name=dir_name, exists=True, size=0, directory=True)
@@ -303,7 +309,13 @@ class S3(BackendBase):
         key = self.base_path + name
         try:
             obj = self.s3.head_object(Bucket=self.bucket, Key=key)
-            return ItemInfo(name=name, exists=True, directory=False, size=obj["ContentLength"])
+            return ItemInfo(
+                name=name,
+                exists=True,
+                directory=False,
+                size=obj["ContentLength"],
+                mtime=obj["LastModified"].timestamp(),
+            )
         except self.s3.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 try:

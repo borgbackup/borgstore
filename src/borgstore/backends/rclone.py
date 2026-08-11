@@ -251,6 +251,10 @@ class Rclone(BackendBase):
         name = item["Name"]
         size = item["Size"]
         directory = item["IsDir"]
+        # no atime/mtime: rclone's ModTime is the *client-side* mtime preserved across upload
+        # (not stamped by the storage side), so it must not be reported as ItemInfo.mtime;
+        # also, fetching it would need "noModTime": False, which on several remotes costs an
+        # extra metadata read per object during list().
         return ItemInfo(name=name, exists=True, size=size, directory=directory)
 
     def info(self, name) -> ItemInfo:

@@ -23,6 +23,8 @@ Use storage on a local POSIX filesystem:
 - Namespaces: directories
 - Values: in key-named files
 - atime: supported (require fs atime support)
+- mtime: supported (stamped by the filesystem's clock - for a network filesystem
+  that is usually the file server's clock)
 - Quota: tracks backend storage size and rejects ``store`` if quota is exceeded.
 
   The current usage is persisted to a hidden file in the storage directory.
@@ -121,6 +123,7 @@ Use storage on an SFTP server:
 - Values: in key-named files
 - store: a ``memoryview`` value is copied into a ``bytes`` object first, because
   paramiko does not accept a ``memoryview``.
+- atime / mtime: supported (stamped by the SFTP server's filesystem)
 - hash: runs the hexdigest computation server-side (if server supports check-file).
   "blake3" is not part of the check-file extension, so it is always computed client-side.
 
@@ -134,6 +137,8 @@ Use storage on any of the many cloud providers `rclone <https://rclone.org/>`_ s
 - The implementation primarily depends on the specific remote.
 - The rclone binary path can be set via the environment variable ``RCLONE_BINARY`` (default: "rclone").
 - Debugging of HTTP requests/responses can be enabled by setting ``BORGSTORE_RCLONE_DEBUG=1``.
+- atime / mtime: not supported (always 0). rclone's ModTime is the client-side mtime
+  preserved across upload, not a timestamp stamped by the storage side.
 
 
 s3
@@ -163,6 +168,8 @@ Use storage on an S3-compliant cloud service:
 - Values: in key-named files
 - store: a ``memoryview`` value is copied into a ``bytes`` object first, because
   boto3 does not accept a ``memoryview``.
+- atime: not supported (always 0).
+- mtime: supported (``LastModified``, stamped by the S3 service).
 
 
 REST (http/https)
@@ -180,4 +187,5 @@ Use a storage backend running inside a BorgStore REST server process:
 - hash: runs the hexdigest computation server-side. Using algorithm "blake3" requires
   the optional ``blake3`` package to be installed **on the server**.
 - defrag: runs the defragmentation helper server-side.
-- atime: supported (if backend used by server supports it).
+- atime / mtime: supported (if backend used by server supports it). mtime is stamped
+  by the server side (the store operation executes there).
