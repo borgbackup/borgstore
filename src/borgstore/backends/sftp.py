@@ -412,7 +412,9 @@ class Sftp(BackendBase):
             return ItemInfo(name=name, exists=False, directory=False, size=0)
         else:
             is_dir = stat.S_ISDIR(st.st_mode)
-            return ItemInfo(name=name, exists=True, directory=is_dir, size=st.st_size)
+            return ItemInfo(
+                name=name, exists=True, directory=is_dir, size=st.st_size, atime=st.st_atime, mtime=st.st_mtime
+            )
 
     @with_reconnect
     def load(self, name, *, size=None, offset=0):
@@ -546,4 +548,11 @@ class Sftp(BackendBase):
                 pass  # that file is likely not from us or is still uploading
             else:
                 is_dir = stat.S_ISDIR(info.st_mode)
-                yield ItemInfo(name=info.filename, exists=True, size=info.st_size, directory=is_dir)
+                yield ItemInfo(
+                    name=info.filename,
+                    exists=True,
+                    size=info.st_size,
+                    directory=is_dir,
+                    atime=info.st_atime,
+                    mtime=info.st_mtime,
+                )

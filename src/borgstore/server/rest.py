@@ -310,6 +310,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                     "Content-Length": str(info.size),
                     "X-BorgStore-Is-Directory": "true" if info.directory else "false",
                     "X-BorgStore-Atime": str(info.atime),
+                    "X-BorgStore-Mtime": str(info.mtime),
                 },
             )
         except Exception as e:
@@ -324,7 +325,13 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 # [{"name": "...", "size": ...}, ...]
                 with self.server.backend:
                     items = (
-                        {"name": item.name, "size": item.size, "directory": item.directory, "atime": item.atime}
+                        {
+                            "name": item.name,
+                            "size": item.size,
+                            "directory": item.directory,
+                            "atime": item.atime,
+                            "mtime": item.mtime,
+                        }
                         for item in self.server.backend.list(self.name)
                     )
                     json_data = json.dumps(list(items), indent=2)

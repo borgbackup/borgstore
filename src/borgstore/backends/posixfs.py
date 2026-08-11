@@ -205,7 +205,9 @@ class PosixFS(BackendBase):
             return ItemInfo(name=path.name, exists=False, directory=False, size=0)
         else:
             is_dir = stat.S_ISDIR(st.st_mode)
-            return ItemInfo(name=path.name, exists=True, directory=is_dir, size=st.st_size, atime=st.st_atime)
+            return ItemInfo(
+                name=path.name, exists=True, directory=is_dir, size=st.st_size, atime=st.st_atime, mtime=st.st_mtime
+            )
 
     def load(self, name, *, size=None, offset=0):
         if not self.opened:
@@ -355,7 +357,14 @@ class PosixFS(BackendBase):
                         pass
                     else:
                         is_dir = stat.S_ISDIR(st.st_mode)
-                        yield ItemInfo(name=p.name, exists=True, size=st.st_size, directory=is_dir, atime=st.st_atime)
+                        yield ItemInfo(
+                            name=p.name,
+                            exists=True,
+                            size=st.st_size,
+                            directory=is_dir,
+                            atime=st.st_atime,
+                            mtime=st.st_mtime,
+                        )
 
     def quota(self) -> dict:
         """Return quota information: limit and usage in bytes. -1 means not set / not tracked."""
