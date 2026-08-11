@@ -1,15 +1,18 @@
 Changelog
 =========
 
-Version 0.6.1 (not released yet)
---------------------------------
+Version 0.6.1 (2026-08-11)
+--------------------------
 
 New features:
 
 - ItemInfo: new ``mtime`` field - the last modification timestamp stamped by the
   *storage side's* clock (0 if unknown). Implemented for posixfs, sftp, s3 and
   rest; rclone reports 0 because its ModTime is a client-supplied timestamp.
-  sftp additionally reports atime now.
+
+Other changes:
+
+- ItemInfo: sftp now also reports ``atime``.
 
 
 Version 0.6.0 (2026-08-02)
