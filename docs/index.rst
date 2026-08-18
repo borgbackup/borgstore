@@ -10,5 +10,6 @@
    store_caching
    backends
    servers
+   development
    changes
    authors
