@@ -1,0 +1,159 @@
+# Release automation: build the source distribution, create a GitHub release
+# with it and publish it to PyPI.
+#
+# This runs when a release tag is pushed. Only a sdist is published, like it
+# always has been.
+#
+# The GitHub release is created as a *draft* on purpose: the release notes want
+# a human. Publishing the draft is a single click in the GitHub UI.
+#
+# The upload to PyPI is a separate job only so that the "pypi" environment gate
+# applies to the upload alone - that is the last chance to stop a release before
+# the irreversible step.
+#
+# One-time setup, so that no API token has to be stored anywhere:
+#  - on pypi.org, add a trusted publisher to the "borgstore" project:
+#    owner "borgbackup", repository "borgstore", workflow "release.yml",
+#    environment "pypi".
+#  - create the "pypi" environment in the repository settings. Configuring
+#    required reviewers for it makes the upload wait for an approval.
+
+name: Release
+
+on:
+  push:
+    # borgstore tags have no "v" prefix: 0.6.1, and 0.7.0b1 for a pre-release.
+    tags:
+    - '*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build the sdist and draft the GitHub release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    permissions:
+      contents: write  # to create the release
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      with:
+        # Just fetching one commit is not enough for setuptools-scm, so we fetch all.
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      with:
+        python-version: '3.13'
+
+    - name: Build the sdist
+      run: |
+        set -euxo pipefail
+        python -m pip install --upgrade pip build twine
+        python -m build --sdist
+        twine check dist/*
+        ls -l dist/
+
+    - name: Check that the sdist is the one for this tag
+      # A missing or unfetched tag makes setuptools-scm silently produce a dev
+      # version - much cheaper to notice here than on PyPI.
+      env:
+        TAG: ${{ github.ref_name }}
+      run: |
+        set -euxo pipefail
+        test -f "dist/borgstore-$TAG.tar.gz"
+
+    - name: Check that the sdist is complete and installable
+      # A release that can not be installed from PyPI is the worst kind of
+      # release. The CI workflow always installs from the checkout (and in
+      # editable mode) and does not run on a tag push at all, so this is the
+      # release gate: the sdist plus all extras must install and the test suite
+      # must pass against what it installs.
+      #
+      # No test services are set up here: the sftp, s3 and rest backend tests
+      # skip themselves without BORGSTORE_TEST_*_URL, the rclone tests skip
+      # without an rclone binary. What remains (posixfs, caching, hashing,
+      # nesting, threading) is what a sdist check needs.
+      env:
+        TAG: ${{ github.ref_name }}
+      run: |
+        set -euxo pipefail
+        python -m venv "$RUNNER_TEMP/venv-sdist"
+        # the REST server tests spawn borgstore-server-rest from PATH, so the
+        # venv has to come first - and pytest has to be the venv's one, too.
+        export PATH="$RUNNER_TEMP/venv-sdist/bin:$PATH"
+        pip install --upgrade pip
+        pip install "dist/borgstore-$TAG.tar.gz[s3,sftp,rest,rclone,blake3]"
+        pip install pytest
+        # tests/ is not in the sdist, it comes from the checkout - but borgstore
+        # is imported from the venv, the checkout only has it below src/.
+        pytest -v -rs tests
+
+    - name: Create the draft release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        set -euxo pipefail
+        # 0.7.0b1 and friends are pre-releases, 0.7.0 is not.
+        prerelease=""
+        case "$TAG" in *a*|*b*|*rc*) prerelease="--prerelease" ;; esac
+        cat > release-notes.md <<EOF
+        See the [changelog](https://github.com/borgbackup/borgstore/blob/$TAG/docs/changes.rst) for what changed in this release.
+
+        ### Installation
+
+        \`pip install borgstore\`, or with the backends you need, e.g.
+        \`pip install "borgstore[sftp,s3]"\`.
+        EOF
+        if gh release view "$TAG" > /dev/null 2>&1; then
+          # a re-run of this job: keep the (possibly already edited) release and
+          # just replace its assets.
+          gh release upload "$TAG" --clobber dist/*.tar.gz
+        else
+          gh release create "$TAG" \
+            --draft $prerelease \
+            --title "borgstore $TAG" \
+            --notes-file release-notes.md \
+            dist/*.tar.gz
+        fi
+        gh release view "$TAG" --json isDraft,isPrerelease,assets
+
+    - name: Keep the sdist for the PyPI upload
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: sdist
+        path: dist/*.tar.gz
+        if-no-files-found: error
+
+  pypi:
+    name: Upload the sdist to PyPI
+    needs: [release]
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    environment:
+      name: pypi
+      url: https://pypi.org/project/borgstore/
+
+    permissions:
+      contents: read
+      id-token: write  # trusted publishing
+
+    steps:
+    - name: Get the sdist built by the release job
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: sdist
+        path: dist
+
+    - name: What we are about to upload
+      run: ls -l dist/
+
+    - name: Upload to PyPI
+      uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
