@@ -1,4 +1,4 @@
-# badge: https://github.com/borgbackup/borgstore/workflows/CI/badge.svg?branch=master
+# badge: https://github.com/borgbackup/borgstore/workflows/CI/badge.svg?branch=main
 
 name: CI
 
@@ -7,7 +7,7 @@ permissions:
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
     paths:
     - '**.py'
     - '**.yml'
@@ -17,7 +17,7 @@ on:
     - 'requirements.d/*'
     - '!docs/**'
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
     paths:
     - '**.py'
     - '**.yml'
