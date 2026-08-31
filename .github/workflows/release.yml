@@ -11,6 +11,12 @@
 # applies to the upload alone - that is the last chance to stop a release before
 # the irreversible step.
 #
+# The sdist gets a build provenance attestation, so that anybody can check that
+# it was built here, from this repository, at this tag. The sigstore bundle that
+# proves it is uploaded to the release as well, next to the sdist, so that the
+# attestation can also be verified offline (and still be there if the GitHub
+# attestations API is not).
+#
 # One-time setup, so that no API token has to be stored anywhere:
 #  - on pypi.org, add a trusted publisher to the "borgstore" project:
 #    owner "borgbackup", repository "borgstore", workflow "release.yml",
@@ -36,7 +42,9 @@ jobs:
     timeout-minutes: 30
 
     permissions:
-      contents: write  # to create the release
+      contents: write   # to create the release
+      id-token: write   # to attest the sdist
+      attestations: write
 
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -94,6 +102,24 @@ jobs:
         # is imported from the venv, the checkout only has it below src/.
         pytest -v -rs tests
 
+    - name: Attest the sdist provenance
+      id: attest
+      uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+      with:
+        subject-path: 'dist/*.tar.gz'
+
+    - name: Keep the attestation bundle with the sdist
+      # The action writes the sigstore bundle to a temporary file and uploads it
+      # to the GitHub attestations API; put a copy next to the sdist under a
+      # name that says what it belongs to, so it can go into the release.
+      env:
+        BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        set -euxo pipefail
+        cp "$BUNDLE" "dist/borgstore-$TAG.tar.gz.sigstore.jsonl"
+        ls -l dist/
+
     - name: Create the draft release
       env:
         GH_TOKEN: ${{ github.token }}
@@ -110,17 +136,28 @@ jobs:
 
         \`pip install borgstore\`, or with the backends you need, e.g.
         \`pip install "borgstore[sftp,s3]"\`.
+
+        ### Verifying the sdist
+
+        The sdist has a [build provenance attestation](https://github.com/borgbackup/borgstore/attestations):
+
+        \`gh attestation verify --owner borgbackup borgstore-$TAG.tar.gz\`
+
+        The \`.sigstore.jsonl\` asset is that attestation, so the same check also
+        works without asking GitHub for it:
+
+        \`gh attestation verify --owner borgbackup --bundle borgstore-$TAG.tar.gz.sigstore.jsonl borgstore-$TAG.tar.gz\`
         EOF
         if gh release view "$TAG" > /dev/null 2>&1; then
           # a re-run of this job: keep the (possibly already edited) release and
           # just replace its assets.
-          gh release upload "$TAG" --clobber dist/*.tar.gz
+          gh release upload "$TAG" --clobber dist/*.tar.gz dist/*.jsonl
         else
           gh release create "$TAG" \
             --draft $prerelease \
             --title "borgstore $TAG" \
             --notes-file release-notes.md \
-            dist/*.tar.gz
+            dist/*.tar.gz dist/*.jsonl
         fi
         gh release view "$TAG" --json isDraft,isPrerelease,assets
 
