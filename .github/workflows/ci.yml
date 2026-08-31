@@ -27,6 +27,10 @@ on:
     - 'requirements.d/*'
     - '!docs/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   ci_job:
 
@@ -70,10 +74,11 @@ jobs:
     continue-on-error: ${{ matrix.allow-failure || false }}
 
     steps:
-    - uses: actions/checkout@v7
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       with:
         # just fetching 1 commit is not enough for setuptools-scm, so we fetch all
         fetch-depth: 0
+        persist-credentials: false
     - name: Install Linux packages
       if: runner.os == 'Linux'
       run: |
@@ -199,7 +204,7 @@ jobs:
         echo "BORGSTORE_TEST_REST1_URL=http://testuser:testpass@localhost/repos/repo1/" >> $GITHUB_ENV
         echo "BORGSTORE_TEST_REST2_URL=http://testuser:testpass@localhost/repos/repo2/" >> $GITHUB_ENV
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install Python requirements
@@ -216,7 +221,8 @@ jobs:
       if: runner.os == 'macOS'
       run: pip install -ve ".[rest,rclone,blake3]"
     - name: run tox envs
-      run: tox -e ${{ matrix.toxenv }}
+      # the toxenv comes from the job-level TOXENV env var, see above.
+      run: tox
     - name: Display diagnostics on failure
       if: failure() && runner.os == 'Linux'
       run: |
