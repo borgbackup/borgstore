@@ -1,0 +1,38 @@
+# Keep the GitHub Actions we use and our Python requirements up to date.
+#
+# The cooldown periods keep us off freshly released versions for a while - if
+# an action or package gets yanked or hotfixed shortly after a release, we
+# never see it.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      # default-days also covers patch releases and actions not using semver.
+      default-days: 14
+      semver-minor-days: 30
+      semver-major-days: 90
+    groups:
+      actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "pip"
+    directory: "/requirements.d"
+    ignore:
+    # black is also pinned in .github/workflows/black.yaml, which dependabot
+    # can not update - bumping only requirements.d/codestyle.txt would make the
+    # two disagree, so we do these bumps by hand.
+    - dependency-name: "black"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      # default-days also covers patch releases and packages not using semver.
+      default-days: 14
+      semver-minor-days: 30
+      semver-major-days: 90
+    groups:
+      pip-dependencies:
+        patterns:
+          - "*"
