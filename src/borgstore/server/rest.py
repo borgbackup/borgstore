@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 import itertools
+import threading
 from http import HTTPStatus as HTTP
 from http.server import ThreadingHTTPServer, HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
@@ -171,7 +172,8 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         cmd = self.query.get("cmd", [None])[0]
         if cmd == "create":
             try:
-                self.server.backend.create()
+                with self.server.backend_lock:
+                    self.server.backend.create()
                 self.respond(HTTP.OK)
             except Exception as e:
                 self._handle_exception(e, "create")
@@ -182,7 +184,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             new = self.query.get("new", [None])[0]
             if current and new:
                 try:
-                    with self.server.backend:
+                    with self.server.backend_lock, self.server.backend:
                         self.server.backend.move(current, new)
                     self.respond(HTTP.OK)
                 except Exception as e:
@@ -193,7 +195,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
         if cmd == "mkdir":
             try:
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     self.server.backend.mkdir(self.name)
                 self.respond(HTTP.OK)
             except Exception as e:
@@ -206,7 +208,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 return
             algorithm = self.query.get("algorithm", ["sha256"])[0]
             try:
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     digest = self.server.backend.hash(self.name, algorithm=algorithm)
                 self.respond(HTTP.OK, data=digest.encode("ascii"), content_type="text/plain")
             except Exception as e:
@@ -215,7 +217,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
         if cmd == "quota":
             try:
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     quota_info = self.server.backend.quota()
                 response_data = json.dumps(quota_info).encode("utf-8")
                 self.respond(HTTP.OK, data=response_data, content_type="application/json")
@@ -235,7 +237,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length)
                 sources = json.loads(body)
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     target = self.server.backend.defrag(
                         sources, target=target, algorithm=algorithm, namespace=namespace, levels=levels
                     )
@@ -257,7 +259,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                     if got_hash != expected_hash:
                         self.respond(HTTP.UNPROCESSABLE_ENTITY, b"Content hash verification failed, please retry")
                         return
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     self.server.backend.store(self.name, data)
                 self.respond(HTTP.OK)
             except Exception as e:
@@ -271,7 +273,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
         cmd = self.query.get("cmd", [None])[0]
         if cmd == "rmdir":
             try:
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     self.server.backend.rmdir(self.name)
                 self.respond(HTTP.OK)
             except Exception as e:
@@ -280,7 +282,8 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
 
         if cmd == "destroy":
             try:
-                self.server.backend.destroy()
+                with self.server.backend_lock:
+                    self.server.backend.destroy()
                 self.respond(HTTP.OK)
             except Exception as e:
                 self._handle_exception(e, "destroy")
@@ -291,7 +294,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            with self.server.backend:
+            with self.server.backend_lock, self.server.backend:
                 self.server.backend.delete(self.name)
             self.respond(HTTP.OK)
         except Exception as e:
@@ -300,7 +303,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
     @checks_and_logging
     def do_HEAD(self):
         try:
-            with self.server.backend:
+            with self.server.backend_lock, self.server.backend:
                 info = self.server.backend.info(self.name)
             if not info.exists:
                 raise ObjectNotFound(self.name)
@@ -323,7 +326,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             try:
                 # send a JSON list of objects
                 # [{"name": "...", "size": ...}, ...]
-                with self.server.backend:
+                with self.server.backend_lock, self.server.backend:
                     items = (
                         {
                             "name": item.name,
@@ -350,7 +353,7 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
             range_header = self.headers.get("Range")
             offset, size = parse_range_header(range_header) if range_header else (0, None)
 
-            with self.server.backend:
+            with self.server.backend_lock, self.server.backend:
                 data = self.server.backend.load(self.name, offset=offset, size=size)
             self.respond(
                 HTTP.PARTIAL_CONTENT if range_header else HTTP.OK, data=data, content_type="application/octet-stream"
@@ -492,6 +495,10 @@ class StdIOHTTPServer(HTTPServer):
 class BorgStoreStdioRESTServer(StdIOHTTPServer):
     def __init__(self, backend, username=None, password=None):
         self.backend = backend
+        # serialize all access to the single shared backend instance: the server is threaded
+        # (a thread per request) and the backend is neither thread-safe nor safe to open/close
+        # concurrently, so every handler holds this lock around its `with self.backend:` block.
+        self.backend_lock = threading.Lock()
         self.username = username
         self.password = password
         super().__init__(BorgStoreRESTRequestHandler)
@@ -510,6 +517,10 @@ class BorgStoreRESTServer(ThreadingHTTPServer):
 
     def __init__(self, server_address, backend, username=None, password=None, adopted_socket=None):
         self.backend = backend
+        # serialize all access to the single shared backend instance: the server is threaded
+        # (a thread per request) and the backend is neither thread-safe nor safe to open/close
+        # concurrently, so every handler holds this lock around its `with self.backend:` block.
+        self.backend_lock = threading.Lock()
         self.username = username
         self.password = password
         if adopted_socket is not None:

@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 import pytest
 
 try:
@@ -17,18 +18,19 @@ except ImportError:
 
 blake3_is_available = blake3 is not None
 
-from borgstore.constants import DEL_SUFFIX
+from borgstore.constants import DEL_SUFFIX, QUOTA_STORE_NAME
 from borgstore.server.rest import BorgStoreRESTServer
 from borgstore.backends.rest import get_rest_backend
-from borgstore.backends.posixfs import get_file_backend
+from borgstore.backends.posixfs import get_file_backend, PosixFS
 from borgstore.backends.errors import ObjectNotFound, BackendAlreadyExists, QuotaExceeded, ReadRangeError
 from borgstore.store import get_backend, Store
 
 
-def start_server(backend_url, address, port, username=None, password=None, permissions=None, quota=None):
-    from borgstore.store import get_backend
+def start_server(backend_url, address, port, username=None, password=None, permissions=None, quota=None, backend=None):
+    if backend is None:
+        from borgstore.store import get_backend
 
-    backend = get_backend(backend_url, permissions=permissions, quota=quota)
+        backend = get_backend(backend_url, permissions=permissions, quota=quota)
     server = BorgStoreRESTServer((address, port), backend, username, password)
     ready = threading.Event()
 
@@ -763,3 +765,53 @@ def test_rest_url(tmp_path):
         assert info_root.directory
 
     store.destroy()
+
+
+def test_concurrent_requests_share_one_backend_safely(tmp_path):
+    # The threaded REST server hands one shared backend instance to all request threads. Each request
+    # does `with backend:` (open on enter, close on exit) plus one operation, so without serialization
+    # concurrent requests collide on the backend's `opened` flag (BackendMustNotBeOpen) and, with a
+    # quota, on the in-memory usage counter. A slow store widens that window so the collision is
+    # reliable; with the server-side backend lock all requests succeed and the quota usage is exact.
+    store_path = tmp_path / "store"
+
+    class SlowStorePosixFS(PosixFS):
+        def store(self, name, value):
+            time.sleep(0.05)  # widen the open()..close() window, like real I/O latency
+            return super().store(name, value)
+
+    n, size = 6, 100
+    backend = SlowStorePosixFS(store_path, quota=10**9)
+    backend.create()
+
+    server, thread = start_server(None, "127.0.0.1", 0, backend=backend)
+    host, port = server.server_address
+    url = f"http://{host}:{port}/"
+    errors = []
+    barrier = threading.Barrier(n)
+
+    def worker(i):
+        try:
+            be = get_rest_backend(url)
+            be.open()
+            try:
+                barrier.wait(timeout=10)  # release all requests as simultaneously as possible
+                be.store(f"key{i}", b"x" * size)
+            finally:
+                be.close()
+        except Exception as e:
+            errors.append(repr(e))
+
+    try:
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join(timeout=30)
+        assert not any(th.is_alive() for th in threads)
+        assert errors == [], f"concurrent requests failed: {errors}"
+        # every store landed and the quota usage is exact (no failed or lost updates):
+        assert int((store_path / QUOTA_STORE_NAME).read_text()) == n * size
+    finally:
+        server.shutdown()
+        server.server_close()
