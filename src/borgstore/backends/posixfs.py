@@ -400,6 +400,30 @@ class PosixFS(BackendBase):
                     total += self._quota_scan(entry.path, skips)
         return total
 
+    def _quota_lock(self, fd):
+        """Exclusively lock the quota file (open as fd), blocking until the lock is acquired.
+
+        No-op on platforms without flock (Windows): there, concurrent sessions are not supported.
+        """
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _quota_unlock(self, fd):
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+
+    @staticmethod
+    def _quota_file_is_current(fd, quota_path):
+        """Check whether the (locked) open file fd still is the quota file at quota_path.
+
+        Another session may have replaced the quota file (by a new file / inode) while we were
+        waiting for the lock: then we hold a lock on the old, unlinked file and must not use it.
+        """
+        try:
+            return os.path.samestat(os.fstat(fd), os.stat(quota_path))
+        except FileNotFoundError:
+            return False  # the quota file was deleted meanwhile
+
     def _quota_persist(self, delta):
         """Persist quota usage to the on-disk quota file.
 
@@ -407,55 +431,54 @@ class PosixFS(BackendBase):
         to the current on-disk value under an exclusive file lock.  This way,
         updates from other sessions are preserved.
 
-        If the quota file does not exist or contains an invalid value, a
-        filesystem scan is performed to determine the actual usage.
+        If the quota file does not exist yet or contains an invalid value, a
+        filesystem scan is performed (under the lock) to determine the actual usage.
 
-        The quota file itself is used as the lock file (opened and locked
-        with flock) so no separate lock file is needed.
+        The quota file itself is used as the lock file (opened and locked with
+        flock) so no separate lock file is needed. As an update replaces the
+        quota file by a new one (atomic rename), a session that opened the file
+        before such a replacement acquires the lock on a stale, unlinked file:
+        it detects that and retries with the current quota file.
         """
         quota_path = self._quota_path()
-        try:
-            fd = os.open(str(quota_path), os.O_RDONLY)
-        except FileNotFoundError:
-            # quota file missing, scan filesystem to determine usage
-            skips = {os.path.abspath(quota_path)}
-            quota_use = self._quota_scan(self.base_path, skips)
-            quota_path.write_text(str(quota_use))
-            self._quota_use_persisted = quota_use
-            self._quota_use = quota_use
-            self._quota_last_persist_time = time.monotonic()
-            return
-        try:
-            if fcntl is not None:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            # read current on-disk value (may have been updated by another session)
+        while True:
+            # if there is no quota file yet, create an empty one: we need it as the lock file
+            # and its (invalid) content triggers the filesystem scan below.
+            fd = os.open(str(quota_path), os.O_RDONLY | os.O_CREAT, 0o666)
             try:
-                on_disk = int(os.read(fd, 100))
-            except ValueError:
-                # invalid content, scan filesystem to determine usage
-                skips = {os.path.abspath(quota_path)}
-                on_disk = self._quota_scan(self.base_path, skips)
-                delta = 0  # scan already gives the true value
-            if is_win32:
-                # Close the file before replacing to avoid AccessDenied on Windows.
-                os.close(fd)
-                fd = -1
-            new_value = max(on_disk + delta, 0)
-            quota_content = str(new_value).encode()
-            tmp_path = self._write_to_tempfile(quota_path.parent, quota_content, do_fsync=True)
-            try:
-                tmp_path.replace(quota_path)  # atomic update
-            except OSError:
-                tmp_path.unlink()
-                raise
-            self._quota_use_persisted = new_value
-            self._quota_use = new_value  # re-sync with on-disk truth
-            self._quota_last_persist_time = time.monotonic()
-        finally:
-            if fcntl is not None:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            if fd >= 0:
-                os.close(fd)
+                self._quota_lock(fd)
+                if not self._quota_file_is_current(fd, quota_path):
+                    continue  # unlock and close the stale file (see finally), retry with the current one
+                # read current on-disk value (may have been updated by another session)
+                try:
+                    on_disk = int(os.read(fd, 100))
+                except ValueError:
+                    # no or invalid content, scan filesystem to determine usage
+                    skips = {os.path.abspath(quota_path)}
+                    on_disk = self._quota_scan(self.base_path, skips)
+                    delta = 0  # scan already gives the true value
+                if is_win32:
+                    # Close the file before replacing to avoid AccessDenied on Windows.
+                    os.close(fd)
+                    fd = -1
+                new_value = max(on_disk + delta, 0)
+                quota_content = str(new_value).encode()
+                tmp_path = self._write_to_tempfile(quota_path.parent, quota_content, do_fsync=True)
+                try:
+                    tmp_path.replace(quota_path)  # atomic update
+                except OSError:
+                    tmp_path.unlink()
+                    raise
+                self._quota_use_persisted = new_value
+                self._quota_use = new_value  # re-sync with on-disk truth
+                self._quota_last_persist_time = time.monotonic()
+                return
+            finally:
+                if fd >= 0:
+                    try:
+                        self._quota_unlock(fd)
+                    finally:
+                        os.close(fd)
 
     def _quota_update(self, delta, force=False):
         """Update quota usage by delta and persist if the change is significant or enough time has elapsed."""

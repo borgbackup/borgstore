@@ -1,6 +1,8 @@
 """Tests for PosixFS quota support."""
 
 import array
+import sys
+import threading
 import time
 
 import pytest
@@ -8,6 +10,8 @@ import pytest
 from borgstore.backends.posixfs import PosixFS
 from borgstore.backends.errors import QuotaExceeded
 from borgstore.constants import QUOTA_STORE_NAME, QUOTA_PERSIST_DELTA, QUOTA_PERSIST_INTERVAL
+
+is_win32 = sys.platform == "win32"
 
 
 @pytest.fixture()
@@ -480,3 +484,80 @@ class TestQuotaConcurrency:
         quota_path = store_path / QUOTA_STORE_NAME
         on_disk = int(quota_path.read_text())
         assert on_disk == 600  # 200 + 300 + 100
+
+    @pytest.mark.skipif(is_win32, reason="needs flock (no locking on windows)")
+    def test_lock_on_replaced_quota_file_is_stale(self, tmp_path):
+        """A session that waited for the lock must not clobber the update of the session it waited for.
+
+        Each update replaces the quota file by a new one (atomic rename), so the lock a session gets on the
+        file it opened before that replacement is on a stale file: it must retry with the current quota file.
+        """
+        store_path = tmp_path / "store"
+        PosixFS(store_path, quota=10**6).create()
+        a = PosixFS(store_path, quota=10**6)
+        b = PosixFS(store_path, quota=10**6)
+        a.open()
+        b.open()
+        quota_path = store_path / QUOTA_STORE_NAME
+        assert int(quota_path.read_text()) == 0
+
+        a_locked = threading.Event()  # a holds the lock
+        b_waiting = threading.Event()  # b has opened the quota file and is about to block on the lock
+        real_a_lock, real_a_write, real_b_lock = a._quota_lock, a._write_to_tempfile, b._quota_lock
+
+        def a_lock(fd):
+            real_a_lock(fd)
+            a_locked.set()
+
+        def a_write(*args, **kwargs):
+            # keep the lock until b is queued on it, only then replace the quota file
+            assert b_waiting.wait(10)
+            return real_a_write(*args, **kwargs)
+
+        def b_lock(fd):
+            b_waiting.set()
+            real_b_lock(fd)
+
+        a._quota_lock, a._write_to_tempfile, b._quota_lock = a_lock, a_write, b_lock
+        thread_a = threading.Thread(target=a._quota_persist, args=(500,))
+        thread_b = threading.Thread(target=b._quota_persist, args=(300,))
+        thread_a.start()
+        assert a_locked.wait(10)
+        thread_b.start()
+        thread_a.join(10)
+        thread_b.join(10)
+        assert not thread_a.is_alive() and not thread_b.is_alive()
+        # b read the stale value 0 from the replaced file and would have written 300 without the retry:
+        assert int(quota_path.read_text()) == 800
+        assert a._quota_use == 500
+        assert b._quota_use == 800  # re-synced with the on-disk truth
+        a.close()
+        b.close()
+
+    @pytest.mark.skipif(is_win32, reason="needs flock (no locking on windows)")
+    def test_concurrent_persists_lose_no_updates(self, tmp_path):
+        """Many sessions storing and persisting concurrently: every update must make it into the on-disk value."""
+        store_path = tmp_path / "store"
+        quota = 10**9
+        PosixFS(store_path, quota=quota).create()
+        sessions, stores, size = 4, 50, 100
+        errors = []
+
+        def session(idx):
+            try:
+                be = PosixFS(store_path, quota=quota)
+                be.open()
+                for i in range(stores):
+                    be.store(f"obj-{idx}-{i}", b"x" * size)
+                    be._quota_update(0, force=True)
+                be.close()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=session, args=(idx,)) for idx in range(sessions)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors
+        assert int((store_path / QUOTA_STORE_NAME).read_text()) == sessions * stores * size
