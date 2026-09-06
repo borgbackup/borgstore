@@ -3,6 +3,7 @@ Generic tests for the backend implementations.
 """
 
 import array
+import errno
 import hashlib
 import os
 import sys
@@ -787,6 +788,33 @@ def test_posixfs_missing_parent_dirs(tmp_path):
         be.store("key", b"value")
     finally:
         be.close()
+
+
+@pytest.mark.skipif(is_win32, reason="uses resource.RLIMIT_FSIZE, which is not available on windows")
+@pytest.mark.parametrize("size", [1000, 1000000], ids=["fails-at-close", "fails-in-write"])
+def test_posixfs_failed_write_leaves_no_tmpfile(posixfs_backend_created, size):
+    # a file size limit makes writes beyond it fail with EFBIG (python ignores SIGXFSZ), so we get a real,
+    # partially written temp file, like with a full disk. a small value fits into the file object's buffer
+    # and only fails when it is flushed at close time, a big value already fails in write.
+    import resource
+
+    backend = posixfs_backend_created
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    with backend:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (512, hard))
+        try:
+            with pytest.raises(OSError) as exc_info:
+                backend.store("key", b"x" * size)
+        finally:
+            resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+        assert exc_info.value.errno == errno.EFBIG
+        # the failed store must not leave anything behind, especially not a (partial) temp file:
+        assert list(backend.base_path.iterdir()) == []
+        assert not backend.info("key").exists
+        # and the backend must still work normally:
+        backend.store("key", b"x" * size)
+        assert backend.load("key") == b"x" * size
+        assert list_names(backend, ROOTNS) == ["key"]
 
 
 def test_hash(tested_backends, request):

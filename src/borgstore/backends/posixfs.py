@@ -223,13 +223,26 @@ class PosixFS(BackendBase):
             raise ObjectNotFound(name) from None
 
     def _write_to_tempfile(self, path, value, suffix=TMP_SUFFIX, do_fsync=False):
-        with tempfile.NamedTemporaryFile(suffix=suffix, dir=path, delete=False) as f:
-            f.write(value)
-            if do_fsync:
-                f.flush()
-                os.fsync(f.fileno())
-            tmp_path = Path(f.name)
-        return tmp_path
+        """Write value to a new, uniquely named temp file in directory path, return the temp file's Path.
+
+        If writing fails (e.g. disk full, I/O error), the partially written temp file is removed
+        before the exception is re-raised, so it does not linger in the store: it would be invisible
+        to .list (TMP_SUFFIX), but it would occupy space (and be counted by the quota scan).
+        """
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, dir=path, delete=False)
+        try:
+            with tmp as f:  # closes the file, flushing any buffered data (that can fail, too)
+                f.write(value)
+                if do_fsync:
+                    f.flush()
+                    os.fsync(f.fileno())
+        except BaseException:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass  # the original exception is more interesting
+            raise
+        return Path(tmp.name)
 
     def store(self, name, value):
         if not self.opened:
