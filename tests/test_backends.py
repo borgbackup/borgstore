@@ -624,6 +624,122 @@ def test_sftp_store_memoryview_gives_bytes_to_paramiko():
     assert type(written[0]) is bytes
 
 
+@pytest.mark.parametrize("fail_in", ["write", "close"], ids=["fails-in-write", "fails-at-close"])
+def test_sftp_store_failed_write_removes_tmpfile(fail_in):
+    # if writing the temp file fails (e.g. server disk full), the partial temp file must be
+    # removed so it does not linger on the server (invisible to .list, but occupying space).
+    opened_names = []
+    unlinked = []
+
+    class FakeFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            if fail_in == "close":  # a pipelined write error surfaces when the file is closed
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return False
+
+        def set_pipelined(self, pipelined):
+            pass
+
+        def write(self, data):
+            if fail_in == "write":
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+    class FakeClient:
+        def open(self, name, mode):
+            opened_names.append(name)
+            return FakeFile()
+
+        def posix_rename(self, curr_name, new_name):
+            raise AssertionError("rename must not happen when the write failed")
+
+        def unlink(self, name):
+            unlinked.append(name)
+
+    backend = Sftp(hostname="localhost", path="/some/path")
+    backend.opened = True
+    backend.client = FakeClient()
+    with pytest.raises(OSError) as exc_info:
+        backend.store("dir/key", b"x" * 100)
+    assert exc_info.value.errno == errno.ENOSPC
+    # the (partial) temp file the store opened must have been unlinked:
+    assert len(opened_names) == 1
+    assert unlinked == opened_names
+
+
+def test_sftp_store_failed_rename_removes_tmpfile():
+    # if the rename to the final name fails, the temp file must be removed, too.
+    unlinked = []
+
+    class FakeFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def set_pipelined(self, pipelined):
+            pass
+
+        def write(self, data):
+            pass
+
+    class FakeClient:
+        def open(self, name, mode):
+            self.tmp_name = name
+            return FakeFile()
+
+        def posix_rename(self, curr_name, new_name):
+            raise OSError(errno.EIO, "I/O error")
+
+        def unlink(self, name):
+            unlinked.append(name)
+
+    backend = Sftp(hostname="localhost", path="/some/path")
+    backend.opened = True
+    backend.client = FakeClient()
+    with pytest.raises(OSError) as exc_info:
+        backend.store("key", b"data")
+    assert exc_info.value.errno == errno.EIO
+    assert unlinked == [backend.client.tmp_name]
+
+
+def test_sftp_store_failed_write_keeps_original_error_if_cleanup_fails():
+    # cleanup of the temp file is best effort: if the unlink itself fails, the original write
+    # error must still propagate (not be masked by the cleanup error).
+    class FakeFile:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def set_pipelined(self, pipelined):
+            pass
+
+        def write(self, data):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    class FakeClient:
+        def open(self, name, mode):
+            return FakeFile()
+
+        def posix_rename(self, curr_name, new_name):
+            pass
+
+        def unlink(self, name):
+            raise OSError(errno.EIO, "unlink also fails")
+
+    backend = Sftp(hostname="localhost", path="/some/path")
+    backend.opened = True
+    backend.client = FakeClient()
+    with pytest.raises(OSError) as exc_info:
+        backend.store("key", b"data")
+    assert exc_info.value.errno == errno.ENOSPC  # the original error, not the cleanup's EIO
+
+
 @pytest.mark.skipif(boto3 is None, reason="boto3 is not installed")
 def test_s3_store_memoryview_gives_bytes_to_boto3():
     # boto3 rejects a memoryview Body (parameter validation), so the s3 backend must convert it.
