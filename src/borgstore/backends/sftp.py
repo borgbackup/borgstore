@@ -447,20 +447,28 @@ class Sftp(BackendBase):
         # so the store never sees partially written data.
         tmp_name = str(tmp_dir / ("".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=8)) + TMP_SUFFIX))
         try:
-            # try to do it quickly, not doing the mkdir. each sftp op might be slow due to latency.
-            # this will frequently succeed, because the dir is already there.
-            _write_to_tmpfile()
-        except FileNotFoundError:
-            # retry, create potentially missing dirs first. this covers these cases:
-            # - either the dirs were not precreated
-            # - a previously existing directory was "lost" in the filesystem
-            self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
-            _write_to_tmpfile()
-        # rename it to the final name:
-        try:
+            try:
+                # try to do it quickly, not doing the mkdir. each sftp op might be slow due to latency.
+                # this will frequently succeed, because the dir is already there.
+                _write_to_tmpfile()
+            except FileNotFoundError:
+                # retry, create potentially missing dirs first. this covers these cases:
+                # - either the dirs were not precreated
+                # - a previously existing directory was "lost" in the filesystem
+                self._mkdir(str(tmp_dir), parents=True, exist_ok=True)
+                _write_to_tmpfile()
+            # rename it to the final name:
             self.client.posix_rename(tmp_name, name)
-        except OSError:
-            self.client.unlink(tmp_name)
+        except BaseException:
+            # writing the temp file or the rename failed (e.g. disk full, I/O error): remove the
+            # (partially written) temp file so it does not linger on the server. It would be invisible
+            # to .list (TMP_SUFFIX), but it would occupy space. Best effort: if the cleanup itself
+            # fails (e.g. the file was never created, or the connection is gone), keep the original
+            # exception, which is the more interesting one (and lets with_reconnect do its job).
+            try:
+                self.client.unlink(tmp_name)
+            except Exception:
+                pass
             raise
 
     @with_reconnect(swallow_not_found=True)
