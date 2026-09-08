@@ -1,6 +1,24 @@
 Changelog
 =========
 
+Version 0.6.2 (2026-09-08)
+--------------------------
+
+Fixes:
+
+- sftp and posixfs backends: remove the partially written temp file if writing it fails
+- rest server: serialize access to the shared backend
+- posixfs: fix lost quota updates when sessions persist concurrently
+
+Other changes:
+
+- CI:
+
+  - add a release workflow, with provenance attestation
+  - let dependabot update the actions and the requirements
+  - harden workflows, as suggested by zizmor
+
+
 Version 0.6.1 (2026-08-11)
 --------------------------
 
