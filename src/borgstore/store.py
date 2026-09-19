@@ -975,13 +975,10 @@ class Store:
                 # last_access is 0 if the item is only known from a backend that has neither atime nor mtime.
                 if last_access and (now - last_access) <= policy.max_age:
                     break
-                index.remove(name)
-                self._cache_delete(name)
+                self._cache_delete(name)  # also removes it from the index
         if policy.size is not None:
             while index.entries and index.total + needed > policy.size:
-                name = next(iter(index.entries))
-                index.remove(name)
-                self._cache_delete(name)
+                self._cache_delete(next(iter(index.entries)))  # also removes it from the index
 
     def _cache_cleanup(self) -> None:
         for index in self._cache_indexes.values():

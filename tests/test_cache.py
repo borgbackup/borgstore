@@ -1,6 +1,9 @@
 """Tests for Store optional cache behavior."""
 
 import logging
+import random
+import sys
+import threading
 
 import pytest
 import borgstore.store as store_module
@@ -956,7 +959,10 @@ def test_cache_eviction_errors_do_not_fail_main_operations(tmp_path):
     try:
         with store:
 
-            def failing_delete(_backend_name):
+            failed = []
+
+            def failing_delete(backend_name):
+                failed.append(backend_name)
                 raise RuntimeError("boom")
 
             original_delete = store.cache_backend.delete
@@ -966,7 +972,10 @@ def test_cache_eviction_errors_do_not_fail_main_operations(tmp_path):
                     store.store(data_name(i), bytes([i]) * 100)
                 for i in range(5):
                     assert store.load(data_name(i)) == bytes([i]) * 100
-                assert store.stats["cache_errors"] >= 1
+                # 3 of the 5 items only fit after evicting another item. an eviction that failed is not
+                # tried again, except if a scan has found the item again.
+                assert len(failed) >= 3
+                assert store.stats["cache_errors"] == len(failed)
             finally:
                 store.cache_backend.delete = original_delete
         # closing the store scans the cache and evicts what could not be evicted before:
@@ -1134,4 +1143,126 @@ def test_cache_scan_uses_mtime_if_there_is_no_atime(tmp_path, monkeypatch):
             assert cached == {nested_names[1], nested_names[3]}
     finally:
         store.cache_backend.list = original_list
+        store.destroy()
+
+
+def test_cache_scan_keeps_more_recent_last_access(tmp_path, monkeypatch):
+    """For a known item, a scan only changes the last access if another client has used it more recently."""
+    now = 1000.0
+    monkeypatch.setattr("borgstore.store.time.time", lambda: now)
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            for i in range(3):
+                now = 1000.0 + i
+                store.store(data_name(i), bytes([i]) * 100)
+            nested_names = [store.find(data_name(i)) for i in range(3)]
+            # another client has used item 0 after us. the atimes of the items 1 and 2 lag behind our last access.
+            atimes = {nested_names[0]: 1010.0, nested_names[1]: 500.0, nested_names[2]: 400.0}
+            sizes = {nested_names[0]: 100, nested_names[1]: 150, nested_names[2]: 100}  # item 1 has another size now
+            original_list = store.cache_backend.list
+
+            def wrapped_list(backend_name):
+                for info in original_list(backend_name):
+                    full_name = (backend_name + "/" + info.name) if backend_name else info.name
+                    if full_name in atimes:
+                        yield info._replace(atime=atimes[full_name], size=sizes[full_name])
+                    else:
+                        yield info
+
+            store.cache_backend.list = wrapped_list
+            try:
+                store._cache_scan(index)
+            finally:
+                store.cache_backend.list = original_list
+            assert list(index.entries.items()) == [
+                (nested_names[1], (150, 1001.0)),
+                (nested_names[2], (100, 1002.0)),
+                (nested_names[0], (100, 1010.0)),
+            ]
+            assert index.total == 350
+    finally:
+        store.destroy()
+
+
+def test_cache_miss_of_item_deleted_by_other_client(tmp_path):
+    """If another client has deleted an item, the index does not keep an entry for it."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            for i in range(2):
+                store.store(data_name(i), bytes([i]) * 100)
+            other, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
+            with other:
+                other.delete(data_name(0))
+            with pytest.raises(ObjectNotFound):
+                store.load(data_name(0))
+            assert set(index.entries) == {store.find(data_name(1))}
+            assert index.total == cache_usage(cache_root) == 100
+    finally:
+        store.destroy()
+
+
+def test_cache_size_limit_in_mirror_mode(tmp_path):
+    store, cache_root = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_MIRROR, "size": 250}}))
+    store.create()
+    try:
+        with store:
+            for i in range(5):
+                store.store(data_name(i), bytes([i]) * 100)
+                assert cache_usage(cache_root) <= 250
+            for i in range(5):
+                assert store.load(data_name(i)) == bytes([i]) * 100  # from the primary, also updates the mirror
+                assert cache_usage(cache_root) <= 250
+            assert store.stats["cache_hits"] == 0
+            assert store._cache_indexes["data/"].total == cache_usage(cache_root) == 200
+    finally:
+        store.destroy()
+
+
+def test_cache_shared_by_concurrent_clients(tmp_path):
+    """Multiple clients use the same size limited cache at the same time, each one with its own view of it."""
+    n_clients, n_items, item_size, size = 4, 40, 1000, 10000
+    names_values = [(data_name(i), bytes([i]) * item_size) for i in range(n_items)]
+    store, cache_root = make_limited_store(tmp_path, size=size)
+    store.create()
+    with make_store(tmp_path, with_cache_backend=False)[0] as uncached:
+        for name, value in names_values:
+            uncached.store(name, value)
+    all_stats, errors = [], []
+
+    def client(seed):
+        try:
+            rnd = random.Random(seed)
+            client_store, _ = make_limited_store(tmp_path, size=size)
+            with client_store:
+                for _ in range(300):
+                    name, value = names_values[rnd.randrange(n_items)]
+                    if rnd.random() < 0.5:
+                        assert client_store.load(name) == value
+                    else:
+                        offset = rnd.randrange(item_size - 10)
+                        assert client_store.load(name, offset=offset, size=10) == value[offset : offset + 10]
+            all_stats.append(client_store.stats)
+        except BaseException as err:
+            errors.append(err)
+
+    try:
+        threads = [threading.Thread(target=client, args=(seed,)) for seed in range(n_clients)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert not errors
+        assert len(all_stats) == n_clients
+        assert all(stats["cache_hits"] > 0 and stats["cache_misses"] > 0 for stats in all_stats)
+        if sys.platform != "win32":  # windows can not delete or replace a file another client has opened
+            assert all(stats["cache_errors"] == 0 for stats in all_stats)
+        # while the clients were working, the cache could be bigger than size. the client that closed last cleaned up:
+        assert cache_usage(cache_root) <= size
+    finally:
         store.destroy()

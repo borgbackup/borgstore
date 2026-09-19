@@ -101,8 +101,10 @@ processes working with the same content-hash addressed data:
 - A client only knows what it has put into the cache itself and what it has
   seen when it last scanned the namespace. Thus, a namespace with a ``size``
   limit is scanned again after the client has put more than ``size / 4`` bytes
-  into it. With N clients, the namespace total size can temporarily reach about
-  ``size * (1 + N / 4)``.
+  into it. So, while N clients are putting items into the cache, the namespace
+  total size usually is above ``size``, it can reach about
+  ``size * (1 + N / 4)``. It is within ``size`` again when the last of these
+  clients has closed the store.
 - Scanning a namespace with a lot of items takes a while. To not block the
   store for that long, the scan is done in steps while the store is in use:
   each item that is put into the cache continues the scan for about 5 ms, the
