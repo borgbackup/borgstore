@@ -939,7 +939,8 @@ class Store:
             # a step lists at least one item or directory, so the scan makes progress.
             for info in scan.infos:
                 if not info.directory:
-                    scan.seen[info.name] = (info.size, info.atime)
+                    # if the backend has no atime, the mtime (when the item was cached) is the best guess.
+                    scan.seen[info.name] = (info.size, info.atime or info.mtime)
                 if max_time is not None and time.perf_counter() - started >= max_time:
                     break
             else:
@@ -971,7 +972,7 @@ class Store:
             now = time.time()
             while index.entries:
                 name, (size, last_access) = next(iter(index.entries.items()))
-                # last_access is 0 if the item is only known from a backend that has no atime.
+                # last_access is 0 if the item is only known from a backend that has neither atime nor mtime.
                 if last_access and (now - last_access) <= policy.max_age:
                     break
                 index.remove(name)

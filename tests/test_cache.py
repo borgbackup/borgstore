@@ -1105,3 +1105,33 @@ def test_cache_scan_errors_do_not_fail_main_operations(tmp_path):
                 store.cache_backend.list = original_list
     finally:
         store.destroy()
+
+
+def test_cache_scan_uses_mtime_if_there_is_no_atime(tmp_path, monkeypatch):
+    """If the cache backend has no atime, max_age and size eviction go by the time an item was cached."""
+    store, cache_root = make_limited_store(tmp_path, max_age=50, size=250)
+    store.create()
+    names_values = [(data_name(i), bytes([i]) * 100) for i in range(4)]
+    fill_shared_cache(tmp_path, names_values)
+    nested_names = [store.find(name) for name, _value in names_values]
+    mtimes = {nested_names[0]: 900.0, nested_names[1]: 990.0, nested_names[2]: 980.0, nested_names[3]: 995.0}
+    monkeypatch.setattr("borgstore.store.time.time", lambda: 1000.0)
+    original_list = store.cache_backend.list
+
+    def wrapped_list(backend_name):
+        for info in original_list(backend_name):
+            full_name = (backend_name + "/" + info.name) if backend_name else info.name
+            if full_name in mtimes:
+                yield info._replace(atime=0, mtime=mtimes[full_name])
+            else:
+                yield info
+
+    store.cache_backend.list = wrapped_list
+    try:
+        with store:
+            # item 0 was older than max_age. of the other 3 items, only 2 fit into size: item 2 was the oldest one.
+            cached = {info.name for info in store._cache_list("data")}
+            assert cached == {nested_names[1], nested_names[3]}
+    finally:
+        store.cache_backend.list = original_list
+        store.destroy()

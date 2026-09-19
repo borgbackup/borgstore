@@ -143,16 +143,18 @@ Limitations
   cache will still have a stale object.
 - For items a ``Store`` has not used itself since it was opened (items cached
   in a previous session or by another client), ``max_age`` and LRU-by-``size``
-  depend on backend ``ItemInfo.atime`` support, currently that is supported by
-  ``posixfs`` and ``REST`` backends. Filesystems often do not update the atime
-  for each read (e.g. ``relatime`` or ``noatime`` mounts), so it can be older
-  than the real last use.
-  If ``atime`` is 0 (not implemented):
+  depend on the timestamps the cache backend gives in ``ItemInfo``:
 
-  - using ``max_age`` would remove these items from the cache when it is
-    scanned
-  - using ``size`` would not evict these items in LRU order, because their
-    order can't be determined
+  - ``atime`` (``posixfs``, ``sftp`` and ``REST`` backends): filesystems often
+    do not update the atime for each read (e.g. ``relatime`` or ``noatime``
+    mounts), so it can be older than the real last use.
+  - If ``atime`` is 0 (not implemented), ``mtime`` is used instead (``s3``
+    backend). That is the time when the item was put into the cache, so
+    ``max_age`` refers to that time and ``size`` evicts the items first that
+    were cached first.
+  - If ``mtime`` is 0 also (``rclone`` backend), using ``max_age`` would remove
+    these items from the cache when it is scanned and using ``size`` would not
+    evict these items in LRU order, because their order can't be determined.
 - If a partial range ``load`` call for an object in a cached namespace causes
   a cache miss, the full object will be read from the primary backend and the
   cache will be populated with the full object (if it is not bigger than
