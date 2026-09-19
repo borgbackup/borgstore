@@ -36,6 +36,19 @@ def make_store(tmp_path, *, config=None, with_cache_backend=True):
     return Store(**kwargs), cache_root
 
 
+def fill_shared_cache(tmp_path, names_values):
+    """Store items using another Store that shares the primary and the cache, but has no cache limits."""
+    other, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
+    with other:
+        for name, value in names_values:
+            other.store(name, value)
+
+
+def cache_usage(cache_root, namespace="data"):
+    """Return the total size of the files the cache really has in namespace."""
+    return sum(path.stat().st_size for path in (cache_root / namespace).rglob("*") if path.is_file())
+
+
 def test_cache_store_memoryview(tmp_path):
     """A memoryview value is written to the primary backend as well as to the cache backend."""
     store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": "writethrough"}}))
@@ -463,8 +476,8 @@ def test_close_cleans_up_lru_cache_items_by_size(tmp_path, monkeypatch):
     store.create()
     names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
     store.open()
-    for name, value in names_values:
-        store.store(name, value)
+    # another client sharing the cache fills it, so this store only finds the items when it scans at close time.
+    fill_shared_cache(tmp_path, names_values)
     nested_names = [store.find(name) for name, _value in names_values]
 
     atimes = {nested_names[0]: 100.0, nested_names[1]: 200.0, nested_names[2]: 300.0}
@@ -506,8 +519,8 @@ def test_close_cleans_up_expired_before_lru_size_eviction(tmp_path, monkeypatch)
     store.create()
     names_values = [("data/00000000", b"aaaa"), ("data/00000001", b"bbbb"), ("data/00000002", b"cccc")]
     store.open()
-    for name, value in names_values:
-        store.store(name, value)
+    # another client sharing the cache fills it, so this store only finds the items when it scans at close time.
+    fill_shared_cache(tmp_path, names_values)
     nested_names = [store.find(name) for name, _value in names_values]
 
     now = 1000.0
@@ -724,5 +737,262 @@ def test_public_cache_invalidate(tmp_path):
             # Scenario 4: Verify that omitting the name parameter raises TypeError (mandatory parameter)
             with pytest.raises(TypeError):
                 store.cache_invalidate()  # type: ignore[call-overload]
+    finally:
+        store.destroy()
+
+
+def make_limited_store(tmp_path, **limits):
+    """Return (store, cache_root), data/ is cached in writethrough mode with the given limits."""
+    return make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH, **limits}}))
+
+
+def data_name(i):
+    return f"data/{i:08d}"
+
+
+def test_cache_size_limit_holds_while_loading(tmp_path):
+    """Loading more than the cache size must not grow the cache beyond its size limit, #183."""
+    names_values = [(data_name(i), bytes([i]) * 100) for i in range(10)]
+    store, cache_root = make_limited_store(tmp_path, size=350)
+    store.create()
+    try:
+        with make_store(tmp_path, with_cache_backend=False)[0] as uncached:
+            for name, value in names_values:
+                uncached.store(name, value)
+        with store:
+            for name, value in names_values:
+                assert store.load(name) == value
+                assert cache_usage(cache_root) <= 350
+            assert cache_usage(cache_root) == 300
+            assert store._cache_indexes["data/"].total == 300
+            # the most recently loaded items are still cached:
+            hits = store.stats["cache_hits"]
+            for name, value in names_values[-3:]:
+                assert store.load(name) == value
+            assert store.stats["cache_hits"] == hits + 3
+    finally:
+        store.destroy()
+
+
+def test_cache_size_limit_holds_while_storing(tmp_path):
+    store, cache_root = make_limited_store(tmp_path, size=350)
+    store.create()
+    try:
+        with store:
+            for i in range(10):
+                store.store(data_name(i), bytes([i]) * 100)
+                assert cache_usage(cache_root) <= 350
+            assert cache_usage(cache_root) == 300
+    finally:
+        store.destroy()
+
+
+def test_cache_evicts_least_recently_used_of_this_session(tmp_path):
+    """The eviction order follows this store's cache hits, it does not depend on the backend's atime."""
+    store, cache_root = make_limited_store(tmp_path, size=300)
+    store.create()
+    try:
+        with store:
+            for i in range(3):
+                store.store(data_name(i), bytes([i]) * 100)
+            assert store.load(data_name(0)) == bytes([0]) * 100  # hit: item 1 is the least recently used now
+            store.store(data_name(3), bytes([3]) * 100)
+            cached = {info.name for info in store._cache_list("data")}
+            assert cached == {store.find(data_name(i)) for i in (0, 2, 3)}
+    finally:
+        store.destroy()
+
+
+def test_cache_partial_load_miss_accounts_full_item(tmp_path):
+    store, cache_root = make_limited_store(tmp_path, size=250)
+    store.create()
+    try:
+        with make_store(tmp_path, with_cache_backend=False)[0] as uncached:
+            for i in range(3):
+                uncached.store(data_name(i), bytes([i]) * 100)
+        with store:
+            for i in range(3):
+                assert store.load(data_name(i), offset=10, size=5) == bytes([i]) * 5
+                assert store._cache_indexes["data/"].total == cache_usage(cache_root) <= 250
+            assert cache_usage(cache_root) == 200
+    finally:
+        store.destroy()
+
+
+def test_cache_does_not_cache_items_bigger_than_size(tmp_path):
+    store, cache_root = make_limited_store(tmp_path, size=100)
+    store.create()
+    try:
+        with store:
+            small, big = b"s" * 60, b"b" * 101
+            store.store(data_name(0), small)
+            store.store(data_name(1), big)  # can not fit, must not evict anything either
+            assert cache_usage(cache_root) == 60
+            assert store.load(data_name(1)) == big
+            assert store.load(data_name(1), offset=1, size=2) == b"bb"
+            assert cache_usage(cache_root) == 60
+            # a big value replacing a small one must not leave the previous value in the cache:
+            store.store(data_name(0), big)
+            assert cache_usage(cache_root) == 0
+            assert store.load(data_name(0)) == big
+            assert store.stats["cache_errors"] == 0
+    finally:
+        store.destroy()
+
+
+def test_cache_index_accounting(tmp_path):
+    """The index total follows overwrite, delete, soft delete / undelete and invalidation."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            store.store(data_name(0), b"a" * 100)
+            store.store(data_name(1), b"b" * 100)
+            assert index.total == cache_usage(cache_root) == 200
+            store.store(data_name(0), b"a" * 30)  # overwrite
+            assert index.total == cache_usage(cache_root) == 130
+            store.move(data_name(0), delete=True)
+            assert index.total == cache_usage(cache_root) == 130
+            assert store.find(data_name(0), deleted=True) in index.entries
+            assert store.find(data_name(0)) not in index.entries
+            store.move(data_name(0), undelete=True)
+            assert index.total == cache_usage(cache_root) == 130
+            assert store.find(data_name(0)) in index.entries
+            store.delete(data_name(0))
+            assert index.total == cache_usage(cache_root) == 100
+            store.cache_invalidate("data/")
+            assert index.total == cache_usage(cache_root) == 0
+            assert not index.entries
+    finally:
+        store.destroy()
+
+
+def test_cache_shared_item_evicted_by_other_client(tmp_path):
+    """If another client evicted an item, that is a cache miss, the item gets cached again."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            store.store(data_name(0), b"a" * 100)
+            store.store(data_name(1), b"b" * 100)
+            (cache_root / store.find(data_name(0))).unlink()
+            assert store.load(data_name(0)) == b"a" * 100
+            assert store.stats["cache_misses"] == 1
+            assert store.stats["cache_errors"] == 0
+            assert index.total == cache_usage(cache_root) == 200
+    finally:
+        store.destroy()
+
+
+def test_cache_shared_hit_on_item_of_other_client(tmp_path):
+    """A cache hit on an item another client has cached adds the full item to the index."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            fill_shared_cache(tmp_path, [(data_name(0), b"a" * 100)])
+            assert index.total == 0
+            assert store.load(data_name(0), offset=0, size=10) == b"a" * 10
+            assert store.stats["cache_hits"] == 1
+            assert index.entries[store.find(data_name(0))][0] == 100
+            assert index.total == 100
+    finally:
+        store.destroy()
+
+
+def test_cache_shared_rescan_sees_other_clients_items(tmp_path):
+    """After inserting more than size / CACHE_RESCAN_DIVISOR bytes, the store scans the shared cache."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            # another client fills the cache up to the limit:
+            fill_shared_cache(tmp_path, [(data_name(100 + i), b"o" * 100) for i in range(10)])
+            assert cache_usage(cache_root) == 1000
+            for i in range(10):
+                store.store(data_name(i), bytes([i]) * 100)
+                # this store can only overshoot by what it inserts between 2 scans:
+                assert cache_usage(cache_root) <= 1000 + 1000 // store_module.CACHE_RESCAN_DIVISOR + 100
+            assert index.total == cache_usage(cache_root) <= 1000
+            # the other client's items were the least recently used ones, so they got evicted first:
+            cached = {info.name for info in store._cache_list("data")}
+            assert {store.find(data_name(i)) for i in range(10)} <= cached
+    finally:
+        store.destroy()
+
+
+def test_cache_max_age_eviction_when_storing(tmp_path, monkeypatch):
+    """Expired items get evicted when something is put into the cache, a cache hit never expires anything."""
+    now = 1000.0
+    monkeypatch.setattr("borgstore.store.time.time", lambda: now)
+    store, cache_root = make_limited_store(tmp_path, max_age=5)
+    store.create()
+    try:
+        with store:
+            store.store(data_name(0), b"a" * 10)
+            now = 1004.0
+            store.store(data_name(1), b"b" * 10)
+            now = 1007.0  # item 0 is expired now
+            assert store.load(data_name(0)) == b"a" * 10
+            assert store.stats["cache_hits"] == 1  # still served from the cache, and that counts as using it
+            now = 1010.0  # item 1 is expired now, item 0 was used 3s ago
+            store.store(data_name(2), b"c" * 10)
+            cached = {info.name for info in store._cache_list("data")}
+            assert cached == {store.find(data_name(i)) for i in (0, 2)}
+    finally:
+        store.destroy()
+
+
+def test_cache_eviction_errors_do_not_fail_main_operations(tmp_path):
+    store, cache_root = make_limited_store(tmp_path, size=250)
+    store.create()
+    try:
+        with store:
+
+            def failing_delete(_backend_name):
+                raise RuntimeError("boom")
+
+            original_delete = store.cache_backend.delete
+            store.cache_backend.delete = failing_delete
+            try:
+                for i in range(5):
+                    store.store(data_name(i), bytes([i]) * 100)
+                for i in range(5):
+                    assert store.load(data_name(i)) == bytes([i]) * 100
+                assert store.stats["cache_errors"] >= 1
+            finally:
+                store.cache_backend.delete = original_delete
+        # closing the store scans the cache and evicts what could not be evicted before:
+        assert cache_usage(cache_root) <= 250
+    finally:
+        store.destroy()
+
+
+def test_cache_without_limits_keeps_no_index(tmp_path):
+    store, cache_root = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_MIRROR}}))
+    store.create()
+    try:
+        with store:
+            assert store._cache_indexes == {}
+            for i in range(5):
+                store.store(data_name(i), bytes([i]) * 100)
+            assert cache_usage(cache_root) == 500
+        assert cache_usage(cache_root) == 500
+    finally:
+        store.destroy()
+
+
+def test_cache_first_open_does_not_count_errors(tmp_path):
+    """Scanning a namespace the cache backend does not have yet is not an error."""
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            pass
+        assert store.stats["cache_errors"] == 0
     finally:
         store.destroy()
