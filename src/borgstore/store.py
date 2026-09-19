@@ -11,7 +11,7 @@ The Store uses a backend to store key/value data and adds some functionality:
 """
 
 from binascii import hexlify
-from collections import Counter
+from collections import Counter, OrderedDict
 from contextlib import contextmanager
 import enum
 from functools import wraps
@@ -32,6 +32,10 @@ from .backends.rest import get_rest_backend
 from .constants import DEL_SUFFIX, ROOTNS
 
 logger = logging.getLogger(__name__)
+
+# a cache namespace with a size limit is rescanned after this store has inserted more than
+# size / CACHE_RESCAN_DIVISOR bytes into it, see Store._cache_scan.
+CACHE_RESCAN_DIVISOR = 4
 
 
 class CacheMode(enum.Enum):
@@ -55,6 +59,44 @@ class CachePolicy(NamedTuple):
     mode: CacheMode
     max_age: Optional[float]
     size: Optional[int]
+
+
+class CacheIndex:
+    """
+    In-memory view of one cache namespace that has a max_age or size limit.
+
+    It tells the Store what to evict without listing the cache backend for each operation.
+    It is this store's view only: what other clients sharing the same cache add, use or
+    evict is only seen when the namespace is scanned, see Store._cache_scan.
+    """
+
+    def __init__(self, namespace: str, policy: CachePolicy):
+        self.namespace = namespace
+        self.policy = policy
+        # nested name -> (size, last access timestamp), least recently used entry first.
+        self.entries: OrderedDict = OrderedDict()
+        self.total = 0  # sum of the entries' sizes
+        self.inserted = 0  # bytes this store has put into the cache since the last scan
+
+    def add(self, name: str, size: int, last_access: float) -> None:
+        """add (or replace) an entry as the most recently used one."""
+        self.remove(name)
+        self.entries[name] = (size, last_access)
+        self.total += size
+
+    def remove(self, name: str) -> None:
+        entry = self.entries.pop(name, None)
+        if entry is not None:
+            self.total -= entry[0]
+
+    def replace_all(self, entries) -> None:
+        """replace the contents by entries, an iterable of (name, size, last_access)."""
+        self.entries = OrderedDict(
+            (name, (size, last_access))
+            for name, size, last_access in sorted(entries, key=lambda entry: (entry[2], entry[0]))
+        )
+        self.total = sum(size for size, _ in self.entries.values())
+        self.inserted = 0
 
 
 def get_backend(url, permissions=None, quota=None):
@@ -153,6 +195,8 @@ class Store:
             if self.cache_backend is None:
                 raise BackendURLInvalid(f"Invalid or unsupported Cache Backend URL: {cache_url}")
         self._cache_disabled = False
+        # namespace -> CacheIndex, only for namespaces with a max_age or size limit, only while opened.
+        self._cache_indexes: dict = {}
         self.cache_namespaces = [
             entry
             for entry in sorted(
@@ -206,6 +250,12 @@ class Store:
             if name.startswith(namespace):
                 return policy
         return CachePolicy(mode=CacheMode.C_OFF, max_age=None, size=None)
+
+    def _cache_index_for(self, name: str) -> Optional[CacheIndex]:
+        for namespace, policy in self.cache_namespaces:
+            if name.startswith(namespace):
+                return self._cache_indexes.get(namespace)
+        return None
 
     @_locked
     def set_levels(self, levels: dict, create: bool = False) -> None:
@@ -281,14 +331,20 @@ class Store:
                 logger.warning(f"borgstore: cache open failed, disabling cache: {err!r}")
                 self._cache_disabled = True
             else:
-                self._cache_cleanup_expired()
+                self._cache_indexes = {
+                    namespace: CacheIndex(namespace, policy)
+                    for namespace, policy in self.cache_namespaces
+                    if policy.max_age is not None or policy.size is not None
+                }
+                self._cache_cleanup()
 
     @_locked
     def close(self) -> None:
         self.backend.close()
         if self.cache_backend is not None:
             if not self._cache_disabled:
-                self._cache_cleanup_expired()
+                self._cache_cleanup()
+            self._cache_indexes = {}
             try:
                 self.cache_backend.close()
             except Exception as err:
@@ -425,10 +481,13 @@ class Store:
         if self.cache_backend is None or self._cache_disabled:
             return None
         self._stats["cache_load_calls"] += 1
+        index = self._cache_index_for(nested_name)
         try:
             value = self.cache_backend.load(nested_name, size=size, offset=offset)
         except ObjectNotFound:
             self._stats["cache_misses"] += 1
+            if index is not None:
+                index.remove(nested_name)  # another client has evicted it
             return None
         except Exception as err:
             logger.warning(f"borgstore: cache load failed for {nested_name!r}: {err!r}")
@@ -436,6 +495,17 @@ class Store:
             return None
         self._stats["cache_hits"] += 1
         self._stats["cache_load_volume"] += len(value)
+        if index is not None:
+            entry = index.entries.get(nested_name)
+            if entry is not None:
+                item_size = entry[0]
+            else:
+                # another client has cached it. value might be only a part of the item.
+                try:
+                    item_size = self.cache_backend.info(nested_name).size
+                except Exception:
+                    item_size = len(value)
+            index.add(nested_name, item_size, time.time())
         return value
 
     @_locked
@@ -478,6 +548,19 @@ class Store:
     def _cache_store(self, nested_name: str, value: StoreValue) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
+        index = self._cache_index_for(nested_name)
+        if index is not None:
+            size_limit = index.policy.size
+            if size_limit is not None and len(value) > size_limit:
+                # it can never fit. also make sure the cache does not keep a previous value.
+                self._cache_delete(nested_name)
+                return
+            if size_limit is not None and index.inserted > size_limit / CACHE_RESCAN_DIVISOR:
+                self._cache_scan(index)
+            # make room before storing, so the cache does not exceed its size limit.
+            # the value replaces a previous one (if any), so that does not count.
+            index.remove(nested_name)
+            self._cache_evict(index, needed=len(value))
         self._stats["cache_store_calls"] += 1
         try:
             self.cache_backend.store(nested_name, value)
@@ -485,6 +568,10 @@ class Store:
         except Exception as err:
             logger.warning(f"borgstore: cache store failed for {nested_name!r}: {err!r}")
             self._stats["cache_errors"] += 1
+        else:
+            if index is not None:
+                index.add(nested_name, len(value), time.time())
+                index.inserted += len(value)
 
     @_locked
     def store(self, name: str, value: StoreValue) -> None:
@@ -511,6 +598,11 @@ class Store:
         if self.cache_backend is None or self._cache_disabled:
             return
         self._stats["cache_delete_calls"] += 1
+        index = self._cache_index_for(nested_name)
+        if index is not None:
+            # also if deleting fails: the eviction must not try the same item again and again,
+            # the next scan brings back an item that is still there.
+            index.remove(nested_name)
         try:
             self.cache_backend.delete(nested_name)
         except ObjectNotFound:
@@ -571,13 +663,25 @@ class Store:
     def _cache_move(self, old_nested: str, new_nested: str) -> None:
         if self.cache_backend is None or self._cache_disabled:
             return
+        old_index = self._cache_index_for(old_nested)
+        entry = old_index.entries.get(old_nested) if old_index is not None else None
         try:
             self.cache_backend.move(old_nested, new_nested)
         except ObjectNotFound:
-            pass
+            if old_index is not None:
+                old_index.remove(old_nested)  # another client has evicted it
         except Exception as err:
             logger.warning(f"borgstore: cache move failed for {old_nested!r}->{new_nested!r}: {err!r}")
             self._stats["cache_errors"] += 1
+        else:
+            if old_index is not None:
+                old_index.remove(old_nested)
+            new_index = self._cache_index_for(new_nested)
+            if new_index is not None:
+                if entry is not None:
+                    new_index.add(new_nested, entry[0], time.time())  # moving counts as using it
+                else:
+                    new_index.remove(new_nested)  # unknown item, the next scan or cache hit adds it
 
     @_locked
     def move(
@@ -745,28 +849,52 @@ class Store:
         )
         return unnest(backend_target, namespace=prefix).removeprefix(prefix)
 
-    def _cache_cleanup_expired(self) -> None:
-        now = time.time()
-        for namespace, policy in self.cache_namespaces:
-            if policy.max_age is None and policy.size is None:
-                continue
-            try:
-                items = [info for info in self._cache_list(namespace.rstrip("/")) if not info.directory]
-                if policy.max_age is not None:
-                    remaining_items = []
-                    for info in items:
-                        if not info.atime or (now - info.atime) > policy.max_age:
-                            self._cache_delete(info.name)
-                        else:
-                            remaining_items.append(info)
-                    items = remaining_items
-                if policy.size is not None:
-                    total_size = sum(info.size for info in items)
-                    for info in sorted(items, key=lambda entry: (entry.atime, entry.name)):
-                        if total_size <= policy.size:
-                            break
-                        self._cache_delete(info.name)
-                        total_size -= info.size
-            except Exception as err:
-                logger.warning(f"borgstore: cache cleanup failed for namespace {namespace!r}: {err!r}")
-                self._stats["cache_errors"] += 1
+    def _cache_scan(self, index: CacheIndex) -> None:
+        """
+        Bring index in line with what the cache backend really has in that namespace.
+
+        Other clients sharing the cache add and evict items, too. Items this store did not
+        know yet are sorted in by their atime, for known items the more recent one of our last
+        access and the atime counts (a backend's atime can lag behind or be not implemented).
+        """
+        namespace = index.namespace
+        index.inserted = 0  # even if scanning fails, do not retry it for each store operation
+        entries = []
+        try:
+            for info in self._cache_list(namespace.rstrip("/")):
+                known = index.entries.get(info.name)
+                last_access = max(known[1], info.atime) if known is not None else info.atime
+                entries.append((info.name, info.size, last_access))
+            index.replace_all(entries)
+        except ObjectNotFound:
+            # nothing was cached in this namespace yet (or a directory vanished while listing).
+            index.replace_all(entries)
+        except Exception as err:
+            logger.warning(f"borgstore: cache scan failed for namespace {namespace!r}: {err!r}")
+            self._stats["cache_errors"] += 1
+
+    def _cache_evict(self, index: CacheIndex, *, needed: int = 0) -> None:
+        """
+        Evict items that are older than max_age, then evict least recently used items until
+        <needed> more bytes fit into the size limit.
+        """
+        policy = index.policy
+        if policy.max_age is not None:
+            now = time.time()
+            while index.entries:
+                name, (size, last_access) = next(iter(index.entries.items()))
+                # last_access is 0 if the item is only known from a backend that has no atime.
+                if last_access and (now - last_access) <= policy.max_age:
+                    break
+                index.remove(name)
+                self._cache_delete(name)
+        if policy.size is not None:
+            while index.entries and index.total + needed > policy.size:
+                name = next(iter(index.entries))
+                index.remove(name)
+                self._cache_delete(name)
+
+    def _cache_cleanup(self) -> None:
+        for index in self._cache_indexes.values():
+            self._cache_scan(index)
+            self._cache_evict(index)

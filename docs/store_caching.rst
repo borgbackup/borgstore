@@ -29,7 +29,8 @@ Each namespace configuration dictionary can have:
   The default is ``None`` (no age limit).
 - ``size``: optional maximum size in bytes. It sets a per-namespace cache
   size budget enforced by evicting least-recently-used items until the
-  namespace total size is within the configured budget.
+  namespace total size is within the configured budget. Items bigger than
+  ``size`` are not cached.
 
 Example::
 
@@ -58,16 +59,54 @@ Behavior
 - Cache keys are identical to primary backend keys (same nesting).
 - Soft-deleted items are cached under the same ``.del`` name as primary.
 - Soft delete/undelete renames cache entries as well.
-- On ``Store.open()`` and ``Store.close()``, cache-enabled namespaces are scanned
-  to clean up the cache. Cleanup order per namespace is:
-
-  1. remove expired cache objects when ``max_age`` is configured,
-  2. if ``size`` is configured, evict the least-recently-used remaining items
-     until the namespace total size is ``<= size``.
-
-  Expired entries are always removed first, even if total size is already below
-  the ``size`` limit.
 - Cache failures are non-fatal and logged as warnings.
+
+Eviction
+--------
+
+For each namespace that has a ``max_age`` or ``size`` limit, the ``Store`` keeps
+an in-memory index of the cached items (name, size, time of last use) while it
+is opened. The index is ordered by the last use *by this store*: a cache hit,
+putting an item into the cache or moving it counts as using it.
+
+- On ``Store.open()`` and ``Store.close()``, the namespace is scanned (listed) and
+  cleaned up. When scanning, items the store did not know yet are ordered by
+  their ``ItemInfo.atime``.
+- Before an item is put into the cache (by ``store()`` or by a ``load()`` that
+  was a cache miss), room is made for it, so the namespace total size stays
+  ``<= size`` also while the store is in use.
+
+Cleanup order per namespace is:
+
+1. remove expired cache objects when ``max_age`` is configured,
+2. if ``size`` is configured, evict the least-recently-used remaining items
+   until the namespace total size (plus the size of the item to put into the
+   cache) is ``<= size``.
+
+Expired entries are always removed first, even if total size is already below
+the ``size`` limit. A cache hit never expires anything: an expired item that is
+still in the cache is served (and that counts as using it).
+
+Shared caches
+-------------
+
+Multiple clients (``Store`` instances, also in different processes) may use the
+same cache at the same time, e.g. a cache directory shared by several
+processes working with the same content-hash addressed data:
+
+- The posixfs backend stores items atomically, so a client never sees or
+  evicts an incompletely written cache item.
+- If another client has evicted an item, that is a cache miss and the item
+  gets cached again.
+- A client only knows what it has put into the cache itself and what it has
+  seen when it last scanned the namespace. Thus, a namespace with a ``size``
+  limit is scanned again after the client has put more than ``size / 4`` bytes
+  into it. With N clients, the namespace total size can temporarily reach about
+  ``size * (1 + N / 4)``.
+- Clients do not see each other's cache hits (see the ``atime`` limitation
+  below), so a client might evict an item another client frequently uses.
+- If the clients use different limits for the same namespace, the smallest
+  limits win.
 
 Manual Cache Invalidation
 -------------------------
@@ -94,22 +133,25 @@ clients, or if cache corruption is suspected), you can use the
 Limitations
 -----------
 
-- Eviction by ``max_age`` or ``size`` is open-time and close-time only
-  (``Store.open()`` / ``Store.close()``), not continuous during
-  ``store()``/``load()`` operations.
 - No proactive cache validation/revalidation.
 - If an object is deleted in the primary backend by another client, the local
   cache will still have a stale object.
-- ``max_age`` and LRU-by-``size`` depend on backend ``ItemInfo.atime`` support,
-  currently that is supported by ``posixfs`` and ``REST`` backends.
+- For items a ``Store`` has not used itself since it was opened (items cached
+  in a previous session or by another client), ``max_age`` and LRU-by-``size``
+  depend on backend ``ItemInfo.atime`` support, currently that is supported by
+  ``posixfs`` and ``REST`` backends. Filesystems often do not update the atime
+  for each read (e.g. ``relatime`` or ``noatime`` mounts), so it can be older
+  than the real last use.
   If ``atime`` is 0 (not implemented):
 
-  - using ``max_age`` would empty the cache on ``Store.open()`` or ``Store.close()``
-  - using ``size`` would not work in LRU order, because order can't be
-    determined
+  - using ``max_age`` would remove these items from the cache when it is
+    scanned
+  - using ``size`` would not evict these items in LRU order, because their
+    order can't be determined
 - If a partial range ``load`` call for an object in a cached namespace causes
   a cache miss, the full object will be read from the primary backend and the
-  cache will be populated with the full object.
+  cache will be populated with the full object (if it is not bigger than
+  ``size``).
 
 Statistics
 ----------
