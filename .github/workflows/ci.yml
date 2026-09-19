@@ -153,13 +153,14 @@ jobs:
         # Create borgstore system user (matches contrib/server/nginx-systemd/borgstore@.service)
         sudo useradd --system --home /srv/borgstore --shell /usr/sbin/nologin borgstore || true
 
-        # Install borgstore[rest] to the system Python so the borgstore service user can run it.
+        # Install borgstore[rest,blake3] to the system Python so the borgstore service user can run it
+        # (blake3: the server computes the hashes, test_hash_blake3 also runs on these backends).
         # Must NOT use -e (editable): the service runs with ProtectHome=true, which makes
         # /home inaccessible. An editable install leaves a .pth pointing to the workspace
         # under /home/runner/work/, so the import would fail at service start. A regular
         # install copies the package to /usr/local/lib/python3.*/dist-packages and the
         # borgstore-server-rest script to /usr/local/bin, which are always accessible.
-        sudo pip3 install --break-system-packages ".[rest]"
+        sudo pip3 install --break-system-packages ".[rest,blake3]"
 
         # Running pip3 as root may have changed ownership of src, so we fix that.
         sudo chown -R $USER:$USER src/
