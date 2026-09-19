@@ -83,7 +83,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y rclone openssh-server curl
+        sudo apt-get install -y rclone openssh-server
     - name: Install macOS packages
       if: runner.os == 'macOS'
       run: |
@@ -118,32 +118,6 @@ jobs:
         ssh-add ~/.ssh/id_ed25519
         # Export SFTP test URL for tox via GITHUB_ENV
         echo "BORGSTORE_TEST_SFTP_URL=sftp://sftpuser@localhost:22/borgstore/temp-store" >> $GITHUB_ENV
-    - name: Install and configure MinIO S3 server (test only)
-      if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
-      run: |
-        set -e
-        arch=$(uname -m)
-        case "$arch" in
-          x86_64|amd64) srv_url=https://dl.min.io/server/minio/release/linux-amd64/minio; cli_url=https://dl.min.io/client/mc/release/linux-amd64/mc ;;
-          aarch64|arm64) srv_url=https://dl.min.io/server/minio/release/linux-arm64/minio; cli_url=https://dl.min.io/client/mc/release/linux-arm64/mc ;;
-          *) echo "Unsupported arch: $arch"; exit 1 ;;
-        esac
-        curl -fsSL -o /usr/local/bin/minio "$srv_url"
-        curl -fsSL -o /usr/local/bin/mc "$cli_url"
-        sudo chmod +x /usr/local/bin/minio /usr/local/bin/mc
-        export PATH=/usr/local/bin:$PATH
-        # Start MinIO on :9000 with default credentials (minioadmin/minioadmin)
-        MINIO_DIR="$GITHUB_WORKSPACE/.minio-data"
-        MINIO_LOG="$GITHUB_WORKSPACE/.minio.log"
-        mkdir -p "$MINIO_DIR"
-        nohup minio server "$MINIO_DIR" --address ":9000" >"$MINIO_LOG" 2>&1 &
-        # Wait for MinIO port to be ready
-        for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/9000) >/dev/null 2>&1 && break; sleep 1; done
-        # Configure client and create bucket
-        mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
-        mc mb --ignore-existing local/test
-        # Export S3 test URL for tox via GITHUB_ENV
-        echo "BORGSTORE_TEST_S3_URL=s3:minioadmin:minioadmin@http://127.0.0.1:9000/test/path" >> $GITHUB_ENV
     - name: Configure nginx + borgstore REST server via systemd socket activation (test only)
       if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
       run: |
@@ -211,6 +185,21 @@ jobs:
       run: |
         python -m pip install --upgrade pip setuptools
         pip install -r requirements.d/dev.txt
+    - name: Install and start moto S3 server (test only)
+      # The S3 tests run against moto in server mode: it comes from PyPI (pinned in
+      # requirements.d/s3-test-server.txt), so there is no server binary to download.
+      # It keeps the objects in memory and accepts any credentials.
+      if: runner.os == 'Linux' && matrix.toxenv != 'flake8' && matrix.toxenv != 'mypy'
+      run: |
+        set -e
+        pip install -r requirements.d/s3-test-server.txt
+        nohup moto_server -H 127.0.0.1 -p 9000 > "$RUNNER_TEMP/moto.log" 2>&1 &
+        # Wait for the moto port to be ready
+        for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/9000) >/dev/null 2>&1 && break; sleep 1; done
+        # Create the bucket (boto3 is a moto dependency)
+        python -c 'import boto3; boto3.client("s3", endpoint_url="http://127.0.0.1:9000", aws_access_key_id="test", aws_secret_access_key="test").create_bucket(Bucket="test")'
+        # Export S3 test URL for tox via GITHUB_ENV
+        echo "BORGSTORE_TEST_S3_URL=s3:test:test@http://127.0.0.1:9000/test/path" >> $GITHUB_ENV
     - name: Install borgstore (Linux)
       if: runner.os == 'Linux'
       run: pip install -ve ".[s3,sftp,rest,rclone,blake3]"
@@ -236,3 +225,5 @@ jobs:
         sudo journalctl -u borgstore@repo1.service --no-pager -n 100 || true
         echo "--- borgstore@repo1 status ---"
         sudo systemctl status borgstore@repo1.service --no-pager || true
+        echo "--- moto S3 server log ---"
+        cat "$RUNNER_TEMP/moto.log" || true
