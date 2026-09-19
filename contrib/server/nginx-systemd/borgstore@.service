@@ -27,7 +27,10 @@ Group=borgstore
 # Minimum required: BORGSTORE_BACKEND, BORGSTORE_USERNAME, BORGSTORE_PASSWORD
 EnvironmentFile=/etc/borgstore/%i.env
 
-ExecStart=/usr/bin/borgstore-server-rest \
+# No absolute path here: systemd looks the executable up in its search path,
+# which covers /usr/local/bin ("pip install" as root) as well as /usr/bin (a
+# distribution package). Use an absolute path for an install in a virtualenv.
+ExecStart=borgstore-server-rest \
     --backend ${BORGSTORE_BACKEND} \
     --username ${BORGSTORE_USERNAME} \
     --password ${BORGSTORE_PASSWORD} \
@@ -48,11 +51,9 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/srv/borgstore
 PrivateTmp=true
-# Keep /run/borgstore/ alive for the lifetime of the service.
-# The socket unit also declares RuntimeDirectory=borgstore, which creates
-# the directory (with correct ownership) before the socket is bound.
-RuntimeDirectory=borgstore
-RuntimeDirectoryMode=0755
+# No RuntimeDirectory=borgstore here: /run/borgstore/ is shared by the sockets
+# of all instances, and systemd removes a runtime directory (with all the
+# sockets in it) as soon as the one instance declaring it stops or fails.
 
 [Install]
 # Not enabled directly; the .socket unit triggers this.

@@ -152,16 +152,13 @@ jobs:
 
         # Create borgstore system user (matches contrib/server/nginx-systemd/borgstore@.service)
         sudo useradd --system --home /srv/borgstore --shell /usr/sbin/nologin borgstore || true
-        # Add the web server user (www-data) to the borgstore group so it can connect
-        # to the unix sockets (which are owned by borgstore:borgstore or borgstore:www-data).
-        sudo usermod -aG borgstore www-data || true
 
         # Install borgstore[rest] to the system Python so the borgstore service user can run it.
         # Must NOT use -e (editable): the service runs with ProtectHome=true, which makes
         # /home inaccessible. An editable install leaves a .pth pointing to the workspace
         # under /home/runner/work/, so the import would fail at service start. A regular
-        # install copies the package into system site-packages (/usr/lib/python3/...) which
-        # is always accessible.
+        # install copies the package to /usr/local/lib/python3.*/dist-packages and the
+        # borgstore-server-rest script to /usr/local/bin, which are always accessible.
         sudo pip3 install --break-system-packages ".[rest]"
 
         # Running pip3 as root may have changed ownership of src, so we fix that.
@@ -199,6 +196,17 @@ jobs:
         sudo rm -f /etc/nginx/sites-enabled/default
         sudo nginx -t
         sudo systemctl restart nginx
+
+        # Create and destroy a store in both repos via nginx. If that does not work, fail here:
+        # the tests would just silently skip the nginx-proxied REST backends.
+        rest() {
+          curl -fsS --max-time 30 -o /dev/null -w "$1 $2: HTTP %{http_code}\n" -X "$1" \
+            -H "Accept: application/vnd.x.borgstore.rest.v1" "http://testuser:testpass@localhost$2"
+        }
+        for repo in repo1 repo2; do
+          rest POST "/repos/$repo/?cmd=create"
+          rest DELETE "/repos/$repo/?cmd=destroy"
+        done
 
         # Export REST test URLs for tox via GITHUB_ENV
         echo "BORGSTORE_TEST_REST1_URL=http://testuser:testpass@localhost/repos/repo1/" >> $GITHUB_ENV

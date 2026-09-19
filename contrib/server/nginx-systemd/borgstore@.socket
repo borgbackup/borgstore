@@ -4,8 +4,8 @@
 # encodes the repo name, and nginx proxies to it directly.
 #
 # Socket path: /run/borgstore/%i.sock
-# RuntimeDirectory= below ensures /run/borgstore/ exists before the socket
-# is created (required because the socket unit starts before the service unit).
+# systemd creates the missing parent directory /run/borgstore/ (root-owned,
+# mode 0755, see DirectoryMode=) when it binds the socket.
 #
 # Enable for a repo:
 #   systemctl enable --now borgstore@repo1.socket
@@ -22,11 +22,9 @@ SocketUser=borgstore
 SocketGroup=www-data
 SocketMode=0660
 Accept=false
-# Create /run/borgstore/ before binding the socket.
-# This must be here (not only in the service unit) because the socket
-# unit starts before the service unit activates.
-RuntimeDirectory=borgstore
-RuntimeDirectoryMode=0755
+# No RuntimeDirectory=borgstore here: /run/borgstore/ is shared by the sockets
+# of all instances, and systemd removes a runtime directory (with all the
+# sockets in it) as soon as the one instance declaring it stops.
 
 [Install]
 WantedBy=sockets.target

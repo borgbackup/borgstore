@@ -86,6 +86,11 @@ nginx -t && nginx -s reload
 - The borgstore process is started on the first connection and stays running
   while connections are open. Add `TimeoutStopSec=` to the service unit to
   shut it down after a period of inactivity.
-- The socket file at `/run/borgstore/<name>.sock` is recreated automatically
-  after a reboot by systemd (`RuntimeDirectory=borgstore` in the service unit).
+- The socket file at `/run/borgstore/<name>.sock` (and the `/run/borgstore/`
+  directory, if missing) is recreated automatically after a reboot by systemd
+  when it starts the enabled socket unit.
+- The service unit runs `borgstore-server-rest` without an absolute path, so
+  systemd finds it in `/usr/local/bin` (`pip install "borgstore[rest]"` as root)
+  or `/usr/bin` (distribution package). For an install in a virtualenv, put the
+  absolute path into `ExecStart=`.
 - TLS is handled entirely by nginx; the borgstore process never sees HTTPS.
