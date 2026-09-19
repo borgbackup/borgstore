@@ -1,5 +1,7 @@
 """Tests for Store optional cache behavior."""
 
+import logging
+
 import pytest
 import borgstore.store as store_module
 
@@ -903,8 +905,9 @@ def test_cache_shared_hit_on_item_of_other_client(tmp_path):
         store.destroy()
 
 
-def test_cache_shared_rescan_sees_other_clients_items(tmp_path):
+def test_cache_shared_rescan_sees_other_clients_items(tmp_path, monkeypatch):
     """After inserting more than size / CACHE_RESCAN_DIVISOR bytes, the store scans the shared cache."""
+    monkeypatch.setattr(store_module, "CACHE_SCAN_STEP_TIME", 60)  # scan it in one step, also if the machine is slow
     store, cache_root = make_limited_store(tmp_path, size=1000)
     store.create()
     try:
@@ -994,5 +997,111 @@ def test_cache_first_open_does_not_count_errors(tmp_path):
         with store:
             pass
         assert store.stats["cache_errors"] == 0
+    finally:
+        store.destroy()
+
+
+def test_cache_scan_in_steps(tmp_path, monkeypatch, caplog):
+    """While the store is in use, a scan is done in steps: each item put into the cache continues it."""
+    monkeypatch.setattr(store_module, "CACHE_SCAN_STEP_TIME", 0)  # a step lists one item or directory
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            fill_shared_cache(tmp_path, [(data_name(100 + i), b"o" * 100) for i in range(10)])
+            scanning = []
+            with caplog.at_level(logging.DEBUG, logger="borgstore.store"):
+                for i in range(100):
+                    store.store(data_name(i), bytes([i]) * 100)
+                    assert store.load(data_name(i)) == bytes([i]) * 100
+                    scanning.append(index.scan is not None)
+                    if True in scanning and not scanning[-1]:
+                        break
+            assert scanning.count(True) > 1  # the scan took multiple steps ...
+            assert not scanning[-1]  # ... and was finished
+            # the store knows the other client's items now and has made room for its own item:
+            assert index.total == cache_usage(cache_root) <= 1000
+            messages = [record.getMessage() for record in caplog.records]
+            messages = [message for message in messages if "cache scan of namespace 'data/'" in message]
+            assert len(messages) == 1
+            assert "10 new, 0 gone" in messages[0]
+            assert f"{scanning.count(True) + 1} steps" in messages[0]
+    finally:
+        store.destroy()
+
+
+def test_cache_scan_in_steps_keeps_changes_by_this_store(tmp_path, monkeypatch):
+    """What the store changes while a scan is in progress is not overridden by what the scan has (not) seen."""
+    monkeypatch.setattr(store_module, "CACHE_SCAN_STEP_TIME", 0)  # a step lists one item or directory
+    store, cache_root = make_limited_store(tmp_path, size=10000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            for i in range(3):
+                store.store(data_name(i), bytes([i]) * 100)
+            fill_shared_cache(tmp_path, [(data_name(9), b"o" * 100)])  # another client caches an item
+            nested = {i: store.find(data_name(i)) for i in (0, 1, 2, 3, 9)}
+            # all items are in the same directory. the scan lists 2 directories, then the items 0, 1, 2 and 9.
+            for _ in range(3):
+                store._cache_scan(index, max_time=0)
+            assert set(index.scan.seen) == {nested[0]}
+            store.delete(data_name(0))  # the scan has seen this item
+            (cache_root / nested[2]).unlink()  # another client evicts an item the scan has not seen yet
+            # the scan has listed the directory already, so it will not see this item. storing it continues the scan.
+            store.store(data_name(3), b"n" * 100)
+            assert set(index.scan.seen) == {nested[0], nested[1]}
+            while index.scan is not None:
+                store._cache_scan(index, max_time=0)
+            assert set(index.entries) == {nested[1], nested[3], nested[9]}
+            assert index.total == cache_usage(cache_root) == 300
+    finally:
+        store.destroy()
+
+
+def test_close_with_a_scan_in_progress(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_module, "CACHE_SCAN_STEP_TIME", 0)  # a step lists one item or directory
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            for i in range(7):
+                store.store(data_name(i), bytes([i]) * 100)
+            assert index.scan is not None and index.scan.seen  # the scan has listed the directory of the items
+            # another client fills the cache. the scan in progress does not see these items any more.
+            fill_shared_cache(tmp_path, [(data_name(100 + i), b"o" * 100) for i in range(10)])
+            assert cache_usage(cache_root) == 1700
+        # closing the store scanned the cache from the start and cleaned it up:
+        assert cache_usage(cache_root) == 1000
+        assert store.stats["cache_errors"] == 0
+    finally:
+        store.destroy()
+
+
+def test_cache_scan_errors_do_not_fail_main_operations(tmp_path):
+    store, cache_root = make_limited_store(tmp_path, size=1000)
+    store.create()
+    try:
+        with store:
+            index = store._cache_indexes["data/"]
+            original_list = store.cache_backend.list
+
+            def failing_list(backend_name):
+                if backend_name.count("/") == 2:  # the scan fails after it has listed 2 directories
+                    raise RuntimeError("boom")
+                yield from original_list(backend_name)
+
+            store.cache_backend.list = failing_list
+            try:
+                for i in range(6):
+                    store.store(data_name(i), bytes([i]) * 100)  # the 4th item starts a scan
+                    assert store.load(data_name(i)) == bytes([i]) * 100
+                assert store.stats["cache_errors"] == 1  # the failed scan is not tried again for each item
+                assert index.scan is None
+                assert index.total == cache_usage(cache_root) == 600
+            finally:
+                store.cache_backend.list = original_list
     finally:
         store.destroy()

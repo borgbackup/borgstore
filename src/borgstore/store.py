@@ -19,7 +19,7 @@ import logging
 import os
 import threading
 import time
-from typing import Iterator, NamedTuple, Optional
+from typing import Generator, Iterator, NamedTuple, Optional
 
 from .utils.nesting import nest, unnest
 from .backends._base import ItemInfo, BackendBase, StoreValue, validate_value
@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 # a cache namespace with a size limit is rescanned after this store has inserted more than
 # size / CACHE_RESCAN_DIVISOR bytes into it, see Store._cache_scan.
 CACHE_RESCAN_DIVISOR = 4
+# such a rescan is done in steps, so it does not block the store for long if the cache has a lot of
+# items: each item that is put into the cache continues the scan for about that long [s].
+CACHE_SCAN_STEP_TIME = 0.005
 
 
 class CacheMode(enum.Enum):
@@ -61,6 +64,17 @@ class CachePolicy(NamedTuple):
     size: Optional[int]
 
 
+class CacheScan:
+    """State of a scan of a cache namespace that is in progress, see Store._cache_scan."""
+
+    def __init__(self, infos: Generator[ItemInfo, None, None]):
+        self.infos = infos  # lists the namespace (items and directories)
+        self.seen: dict = {}  # nested name -> (size, last access timestamp), as listed
+        self.changed: set = set()  # names the store has added, used or removed since the scan started
+        self.steps = 0
+        self.time = 0.0  # time spent scanning [s]
+
+
 class CacheIndex:
     """
     In-memory view of one cache namespace that has a max_age or size limit.
@@ -76,7 +90,8 @@ class CacheIndex:
         # nested name -> (size, last access timestamp), least recently used entry first.
         self.entries: OrderedDict = OrderedDict()
         self.total = 0  # sum of the entries' sizes
-        self.inserted = 0  # bytes this store has put into the cache since the last scan
+        self.inserted = 0  # bytes this store has put into the cache since it started the last scan
+        self.scan: Optional[CacheScan] = None  # the scan that is in progress
 
     def add(self, name: str, size: int, last_access: float) -> None:
         """add (or replace) an entry as the most recently used one."""
@@ -88,6 +103,8 @@ class CacheIndex:
         entry = self.entries.pop(name, None)
         if entry is not None:
             self.total -= entry[0]
+        if self.scan is not None:
+            self.scan.changed.add(name)
 
     def replace_all(self, entries) -> None:
         """replace the contents by entries, an iterable of (name, size, last_access)."""
@@ -96,7 +113,52 @@ class CacheIndex:
             for name, size, last_access in sorted(entries, key=lambda entry: (entry[2], entry[0]))
         )
         self.total = sum(size for size, _ in self.entries.values())
+
+    def start_scan(self, infos: Generator[ItemInfo, None, None]) -> None:
+        self.scan = CacheScan(infos)
         self.inserted = 0
+
+    def abort_scan(self) -> None:
+        if self.scan is not None:
+            self.scan.infos.close()
+            self.scan = None
+
+    def finish_scan(self) -> tuple[int, int]:
+        """
+        Bring the index in line with what the scan has seen, return (added, removed) entry counts.
+
+        The scan has listed the namespace while the store went on using the cache. It might have
+        seen an item before the store removed it or have missed an item the store added after that
+        directory was listed. Thus, for names the store has changed since the scan started, the
+        index is right and the scan is ignored. For all other names, the scan is right:
+
+        - known items the scan has not seen were evicted by another client.
+        - unknown items the scan has seen were cached by another client.
+        - for known items, the more recent one of our last access and the listed one counts
+          (another client might have used the item).
+        """
+        scan, self.scan = self.scan, None
+        gone = []  # names
+        new, updated = [], []  # (name, (size, last_access))
+        for name, (size, last_access) in self.entries.items():
+            if name not in scan.changed:
+                seen = scan.seen.get(name)
+                if seen is None:
+                    gone.append(name)
+                elif seen[0] != size or seen[1] > last_access:
+                    updated.append((name, (seen[0], max(last_access, seen[1]))))
+        for name, seen in scan.seen.items():
+            if name not in self.entries and name not in scan.changed:
+                new.append((name, seen))
+        for name in gone:
+            self.remove(name)
+        if new or updated:
+            # these must be sorted in by their last access. if there are none (as usual if the
+            # cache is not shared), the entries are in the right order already.
+            entries = dict(self.entries)
+            entries.update(new + updated)
+            self.replace_all((name, size, last_access) for name, (size, last_access) in entries.items())
+        return len(new), len(gone)
 
 
 def get_backend(url, permissions=None, quota=None):
@@ -555,8 +617,10 @@ class Store:
                 # it can never fit. also make sure the cache does not keep a previous value.
                 self._cache_delete(nested_name)
                 return
-            if size_limit is not None and index.inserted > size_limit / CACHE_RESCAN_DIVISOR:
-                self._cache_scan(index)
+            if index.scan is not None or (
+                size_limit is not None and index.inserted > size_limit / CACHE_RESCAN_DIVISOR
+            ):
+                self._cache_scan(index, max_time=CACHE_SCAN_STEP_TIME)
             # make room before storing, so the cache does not exceed its size limit.
             # the value replaces a previous one (if any), so that does not count.
             index.remove(nested_name)
@@ -722,13 +786,16 @@ class Store:
             if self._cache_policy_for(name).mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
                 self._cache_move(nested_name, nested_new_name)
 
-    def _cache_list(self, name: str) -> Iterator[ItemInfo]:
+    def _cache_list(self, name: str, *, dirs: bool = False) -> Generator[ItemInfo, None, None]:
+        """list all cached items below <name> (recursively), with dirs=True also the directories."""
         if self.cache_backend is None:
             return
         for info in self.cache_backend.list(name):
             if info.directory:
                 subdir_name = (name + "/" + info.name) if name else info.name
-                yield from self._cache_list(subdir_name)
+                if dirs:
+                    yield info._replace(name=subdir_name)
+                yield from self._cache_list(subdir_name, dirs=dirs)
             else:
                 full_name = (name + "/" + info.name) if name else info.name
                 yield info._replace(name=full_name)
@@ -849,29 +916,50 @@ class Store:
         )
         return unnest(backend_target, namespace=prefix).removeprefix(prefix)
 
-    def _cache_scan(self, index: CacheIndex) -> None:
+    def _cache_scan(self, index: CacheIndex, *, max_time: Optional[float] = None) -> None:
         """
-        Bring index in line with what the cache backend really has in that namespace.
+        Bring index in line with what the cache backend really has in that namespace:
+        other clients sharing the cache add, use and evict items, too.
 
-        Other clients sharing the cache add and evict items, too. Items this store did not
-        know yet are sorted in by their atime, for known items the more recent one of our last
-        access and the atime counts (a backend's atime can lag behind or be not implemented).
+        Scanning means listing the whole namespace, which takes long if it has a lot of items.
+        If max_time [s] is given, the scan is done in steps: a call starts a scan or continues
+        the scan that is in progress for about that time, the call that gets to the end of the
+        listing finishes the scan and updates the index, see CacheIndex.finish_scan.
+        Between the steps, the store uses the cache and the index as usual.
         """
+        started = time.perf_counter()
         namespace = index.namespace
-        index.inserted = 0  # even if scanning fails, do not retry it for each store operation
-        entries = []
+        if index.scan is None:
+            # this also resets index.inserted, so a failing scan is not retried for each store operation.
+            index.start_scan(self._cache_list(namespace.rstrip("/"), dirs=True))
+        scan = index.scan
+        scan.steps += 1
+        finished = False
         try:
-            for info in self._cache_list(namespace.rstrip("/")):
-                known = index.entries.get(info.name)
-                last_access = max(known[1], info.atime) if known is not None else info.atime
-                entries.append((info.name, info.size, last_access))
-            index.replace_all(entries)
+            # a step lists at least one item or directory, so the scan makes progress.
+            for info in scan.infos:
+                if not info.directory:
+                    scan.seen[info.name] = (info.size, info.atime)
+                if max_time is not None and time.perf_counter() - started >= max_time:
+                    break
+            else:
+                finished = True
         except ObjectNotFound:
             # nothing was cached in this namespace yet (or a directory vanished while listing).
-            index.replace_all(entries)
+            finished = True
         except Exception as err:
             logger.warning(f"borgstore: cache scan failed for namespace {namespace!r}: {err!r}")
             self._stats["cache_errors"] += 1
+            index.abort_scan()
+            return
+        if finished:
+            added, removed = index.finish_scan()
+        scan.time += time.perf_counter() - started
+        if finished:
+            logger.debug(
+                f"borgstore: cache scan of namespace {namespace!r} -> {len(index.entries)} items "
+                f"({added} new, {removed} gone) in {scan.time * 1e3:0.1f}ms ({scan.steps} steps)"
+            )
 
     def _cache_evict(self, index: CacheIndex, *, needed: int = 0) -> None:
         """
@@ -896,5 +984,6 @@ class Store:
 
     def _cache_cleanup(self) -> None:
         for index in self._cache_indexes.values():
+            index.abort_scan()  # a scan that was done in steps does not know the latest changes by other clients
             self._cache_scan(index)
             self._cache_evict(index)

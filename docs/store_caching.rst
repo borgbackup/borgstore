@@ -103,6 +103,11 @@ processes working with the same content-hash addressed data:
   limit is scanned again after the client has put more than ``size / 4`` bytes
   into it. With N clients, the namespace total size can temporarily reach about
   ``size * (1 + N / 4)``.
+- Scanning a namespace with a lot of items takes a while. To not block the
+  store for that long, the scan is done in steps while the store is in use:
+  each item that is put into the cache continues the scan for about 5 ms, the
+  store uses the cache as usual between these steps. ``Store.open()`` and
+  ``Store.close()`` scan the namespace in one go.
 - Clients do not see each other's cache hits (see the ``atime`` limitation
   below), so a client might evict an item another client frequently uses.
 - If the clients use different limits for the same namespace, the smallest
