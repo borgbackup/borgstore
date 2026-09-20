@@ -1,6 +1,21 @@
 Changelog
 =========
 
+Version 0.6.3 (2026-09-20)
+--------------------------
+
+Fixes:
+
+- nginx-systemd units: fix service start and socket removal
+- caching:
+
+  - continuous cache eviction, #183.
+    The cache was only cleaned up by Store.open() and Store.close(), so reading a
+    lot of data grew a size limited cache without bounds while the store was in use.
+  - scan the cache in steps while the store is in use
+  - use the mtime if the cache backend has no atime
+
+
 Version 0.6.2 (2026-09-08)
 --------------------------
 
