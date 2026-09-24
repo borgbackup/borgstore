@@ -1,6 +1,14 @@
 Changelog
 =========
 
+Version 0.6.4 (2026-09-24)
+--------------------------
+
+Fixes:
+
+- posixfs: a name below a non-directory object does not exist
+
+
 Version 0.6.3 (2026-09-20)
 --------------------------
 
