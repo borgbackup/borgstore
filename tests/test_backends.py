@@ -895,6 +895,24 @@ def test_missing_nesting_dir_move(tested_backends, request):
         backend.move("namespace2/nest2/key2", "namespace2a/nest2a/key2a")
 
 
+def test_parent_is_an_object(tested_backends, request):
+    # a name below an object (not below a directory) does not exist, like on Windows, where the OS reports
+    # such a path as not found (on POSIX, it is ENOTDIR).
+    if tested_backends == "rclone_backend_created":
+        # TODO: rclone's local backend answers ENOTDIR with HTTP 500 (not 404), so we get a BackendError.
+        pytest.skip("rclone does not report a name below an object as not found")
+    with get_backend_from_fixture(tested_backends, request) as backend:
+        backend.store("key", b"value")
+        assert not backend.info("key/child").exists
+        with pytest.raises(ObjectNotFound):
+            backend.load("key/child")
+        with pytest.raises(ObjectNotFound):
+            backend.hash("key/child")
+        with pytest.raises(ObjectNotFound):
+            backend.delete("key/child")
+        assert backend.load("key") == b"value"
+
+
 def test_posixfs_missing_parent_dirs(tmp_path):
     be = PosixFS(tmp_path / "missing_parent_dir1" / "missing_parent_dir2" / "store")
     be.create()  # this should work, auto-creating the missing parent dir(s)
