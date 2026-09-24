@@ -201,7 +201,7 @@ class PosixFS(BackendBase):
         self._check_permission(name, "lr")
         try:
             st = path.stat()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             return ItemInfo(name=path.name, exists=False, directory=False, size=0)
         else:
             is_dir = stat.S_ISDIR(st.st_mode)
@@ -219,7 +219,7 @@ class PosixFS(BackendBase):
                 if offset != 0:
                     f.seek(offset, os.SEEK_SET if offset >= 0 else os.SEEK_END)
                 return f.read(-1 if size is None else size)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             raise ObjectNotFound(name) from None
 
     def _write_to_tempfile(self, path, value, suffix=TMP_SUFFIX, do_fsync=False):
@@ -288,7 +288,7 @@ class PosixFS(BackendBase):
             if self.quota_limit is not None:
                 size = path.stat().st_size
             path.unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             raise ObjectNotFound(name) from None
         if self.quota_limit is not None:
             self._quota_update(-size)
@@ -344,7 +344,7 @@ class PosixFS(BackendBase):
         try:
             with path.open("rb") as f:
                 h = hashing.file_digest(f, algorithm)
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             raise ObjectNotFound(name) from None
         return h.hexdigest()
 
