@@ -361,6 +361,12 @@ def test_move_delete_undelete(posixfs_store_created):
         store.move(nsk0, undelete=True)  # undelete a previously soft-deleted item
         assert list_store_names(store, ns, deleted=False) == [k0, k1]
         assert list_store_names(store, ns, deleted=True) == []
+        # Delete again, while a soft-deleted item of the same name exists
+        store.move(nsk0, delete=True)  # soft-delete
+        store.store(nsk0, v0)  # same name again
+        store.move(nsk0, delete=True)  # soft-delete, replacing the already soft-deleted item
+        assert list_store_names(store, ns, deleted=False) == [k1]
+        assert list_store_names(store, ns, deleted=True) == [k0]
 
 
 def test_move_change_level(posixfs_store_created):

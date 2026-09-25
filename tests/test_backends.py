@@ -895,6 +895,15 @@ def test_missing_nesting_dir_move(tested_backends, request):
         backend.move("namespace2/nest2/key2", "namespace2a/nest2a/key2a")
 
 
+def test_move_replaces_existing(tested_backends, request):
+    with get_backend_from_fixture(tested_backends, request) as backend:
+        backend.store("key1", b"value1")
+        backend.store("key2", b"value2")
+        backend.move("key1", "key2")
+        assert not backend.info("key1").exists
+        assert backend.load("key2") == b"value1"
+
+
 def test_parent_is_an_object(tested_backends, request):
     # a name below an object (not below a directory) does not exist, like on Windows, where the OS reports
     # such a path as not found (on POSIX, it is ENOTDIR).
