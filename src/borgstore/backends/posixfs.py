@@ -21,7 +21,7 @@ try:
 except ImportError:
     fcntl = None  # not available on Windows
 
-from ._base import BackendBase, ItemInfo, validate_name, validate_value
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, validate_sources
 from .errors import BackendError, BackendAlreadyExists, BackendDoesNotExist, BackendMustNotBeOpen, BackendMustBeOpen
 from .errors import ObjectNotFound, PermissionDenied, QuotaExceeded
 from ..constants import TMP_SUFFIX, QUOTA_STORE_NAME, QUOTA_PERSIST_DELTA, QUOTA_PERSIST_INTERVAL
@@ -323,17 +323,23 @@ class PosixFS(BackendBase):
             except FileNotFoundError:
                 raise ObjectNotFound(curr_name) from None
 
+    def gather(self, sources) -> bytes:
+        if not self.opened:
+            raise BackendMustBeOpen()
+        sources = validate_sources(sources)
+        # check the permissions of all sources before reading anything
+        for name in dict.fromkeys(name for name, _, _ in sources):
+            self._check_permission(name, "r")
+        return super().gather(sources)
+
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:
         if not self.opened:
             raise BackendMustBeOpen()
-        # check all permissions before doing anything
+        # check the target permission before doing anything (the sources are checked by gather).
         prefix = namespace.rstrip("/") + "/" if namespace else ""
         # if target is not given, an item named like content-hash is created in same namespace.
         check_target = target if target else prefix + "01234567"
         self._check_permission(check_target, "W")
-        names = [prefix + source[0] for source in sources]
-        for name in names:
-            self._check_permission(name, "r")
         return super().defrag(sources, target=target, algorithm=algorithm, namespace=namespace, levels=levels)
 
     def hash(self, name: str, algorithm: str = "sha256") -> str:

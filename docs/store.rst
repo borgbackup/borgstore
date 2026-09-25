@@ -14,6 +14,10 @@ API can be much simpler:
 - store: write a new item into the store (providing its key/value pair).
 - load: read a value from the store (given its key); partial loads specifying
   an offset and/or size are supported.
+- gather: read multiple byte ranges (from one or multiple items in the same
+  namespace) with one call, returning their contents concatenated in the order
+  given. The caller knows the sizes it requested, so it can split the result
+  (e.g. into memoryview slices). A short read raises ``ReadRangeError``.
 - info: get information about an item via its key (exists, size, ...).
 - hash: computes the hexdigest for the content of an item (given its key).
   Supported algorithms are all algorithms supported by ``hashlib`` (e.g.
@@ -193,4 +197,7 @@ Scalability
   chunks before storing them in the store.
 - Partial loads improve performance by avoiding a full load if only part
   of the value is needed (e.g., a header with metadata).
+- gather improves performance if multiple parts of values are needed: a remote
+  backend that supports it (e.g. REST) reads all the ranges with one roundtrip,
+  while a partial load per range would cost one roundtrip each.
 

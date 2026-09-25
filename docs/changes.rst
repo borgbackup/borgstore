@@ -1,6 +1,20 @@
 Changelog
 =========
 
+Version 0.7.0 (not released yet)
+--------------------------------
+
+New features:
+
+- gather: read multiple byte ranges (from one or multiple items) with one call, #211.
+  The REST backend does it with one roundtrip (server-side gather), other backends
+  do one partial load per range.
+
+Other changes:
+
+- defrag: implemented on top of gather.
+
+
 Version 0.6.4 (2026-09-24)
 --------------------------
 

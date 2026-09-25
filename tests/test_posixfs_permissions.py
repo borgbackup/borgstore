@@ -137,3 +137,29 @@ def test_recursive_permission_shadowing(tmp_path):
     with pytest.raises(PermissionDenied):
         fs.store("restricted/item2", DATA2)
     fs.close()
+
+
+def test_gather_permissions(tmp_path):
+    fs = PosixFS(path=tmp_path, permissions={"": "w"})  # permissions needed for setup
+    fs.create()
+    fs.open()
+    fs.mkdir("dir1")
+    fs.mkdir("dir2")
+    fs.store("dir1/file", DATA1)
+    fs.store("dir2/file", DATA2)
+    # r granted for both dirs
+    fs.permissions = {"dir1": "r", "dir2": "r"}
+    assert fs.gather([("dir1/file", 0, 2), ("dir2/file", 2, 3)]) == b"da" + b"ta2"
+    # r denied for dir2: all sources are checked before anything is read
+    fs.permissions = {"dir1": "r", "dir2": ""}
+    with pytest.raises(PermissionDenied):
+        fs.gather([("dir1/file", 0, 2), ("dir2/file", 2, 3)])
+    assert fs.gather([("dir1/file", 0, 2)]) == b"da"
+    # defrag needs r for the sources (checked by gather) and W for the target
+    fs.permissions = {"dir1": "rW", "dir2": ""}
+    assert fs.defrag([("dir1/file", 0, 2)], target="dir1/target") == "dir1/target"
+    with pytest.raises(PermissionDenied):
+        fs.defrag([("dir1/file", 0, 2), ("dir2/file", 2, 3)], target="dir1/target")
+    with pytest.raises(PermissionDenied):
+        fs.defrag([("dir1/file", 0, 2)], target="dir2/target")
+    fs.close()

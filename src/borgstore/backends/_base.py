@@ -10,6 +10,7 @@ from typing import Iterator
 
 from ..constants import MAX_NAME_LENGTH, TMP_SUFFIX, HID_SUFFIX
 from ..utils import hashing
+from .errors import ReadRangeError
 
 # atime is the last read access UNIX timestamp [s] or 0 if not implemented.
 # mtime is the last modification UNIX timestamp [s] or 0 if not implemented - it must be
@@ -45,6 +46,32 @@ def to_bytes(value: StoreValue) -> bytes:
     Note: this copies the data, except if it already is a bytes object.
     """
     return value if isinstance(value, bytes) else bytes(value)
+
+
+def validate_sources(sources) -> list:
+    """Validate the sources given to gather / defrag, return them as a list of (name, offset, size) tuples.
+
+    Each source is a (name, offset, size) tuple (or list, e.g. when it comes from JSON):
+    name is an item name [str], offset is an int (negative: counted from the end of the item),
+    size is a non-negative int (the exact amount of bytes wanted).
+    """
+    # always build a new list and let the caller use it instead of <sources>: if <sources> is a
+    # generator (or another iterator), the validation consumes it, so iterating over <sources>
+    # again would silently yield nothing.
+    result = []
+    for source in sources:
+        try:
+            name, offset, size = source
+        except (TypeError, ValueError):
+            raise ValueError(f"source must be a (name, offset, size) tuple, got {source!r}") from None
+        if not isinstance(name, str):
+            raise ValueError(f"source name must be a str, got {name!r}")
+        if not isinstance(offset, int) or isinstance(offset, bool):
+            raise ValueError(f"source offset must be an int, got {offset!r}")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise ValueError(f"source size must be a non-negative int, got {size!r}")
+        result.append((name, offset, size))
+    return result
 
 
 def validate_name(name):
@@ -156,6 +183,33 @@ class BackendBase(ABC):
     def move(self, curr_name: str, new_name: str) -> None:
         """rename curr_name to new_name (overwrite target)"""
 
+    def gather(self, sources) -> bytes:
+        """
+        Read multiple byte ranges (from one or multiple items) and return their contents
+        concatenated, in the order given.
+
+        <sources> is a list of (name, offset, size) tuples, see validate_sources. The item names
+        are backend names (with namespace and nesting, as for load). A short read raises
+        ReadRangeError. For an empty list, b"" is returned.
+
+        The caller knows the sizes of the requested ranges, so it can split the returned data
+        (e.g. into memoryview slices).
+        """
+        # default implementation: one (partial) load per range, works for all backends.
+        # might be overridden for performance (e.g. to save one roundtrip per range).
+        sources = validate_sources(sources)
+        data_parts = []
+        for name, offset, size in sources:
+            if size == 0:
+                continue  # nothing to read (and some backends reject an empty range request)
+            chunk = self.load(name, offset=offset, size=size)
+            if len(chunk) != size:
+                raise ReadRangeError(
+                    f"Read range error from {name} (requested {size} bytes at offset {offset}, got {len(chunk)})"
+                )
+            data_parts.append(chunk)
+        return b"".join(data_parts)
+
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:
         """
         Similar to the higher-level Store.defrag method, with these differences:
@@ -168,20 +222,11 @@ class BackendBase(ABC):
 
         Returns the target item name.
         """
-        # default implementation: slow, but works for all backends.
-        # might be overridden for performance.
+        # default implementation: gather the ranges, then store them as a new item.
+        # works for all backends, might be overridden (e.g. to run it remotely).
         from ..utils.nesting import nest
-        from .errors import ReadRangeError
 
-        data_parts = []
-        for source, offset, size in sources:
-            chunk = self.load(source, offset=offset, size=size)
-            if len(chunk) != size:
-                raise ReadRangeError(
-                    f"Read range error from {source} (requested {size} bytes at offset {offset}, got {len(chunk)})"
-                )
-            data_parts.append(chunk)
-        data = b"".join(data_parts)
+        data = self.gather(sources)
         if target is None:
             if algorithm is None:
                 raise ValueError("Either target or algorithm must be given for defrag")

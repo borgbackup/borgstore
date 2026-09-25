@@ -1266,3 +1266,69 @@ def test_cache_shared_by_concurrent_clients(tmp_path):
         assert cache_usage(cache_root) <= size
     finally:
         store.destroy()
+
+
+def test_cache_gather(tmp_path):
+    """gather serves ranges of cached namespaces like load does, the rest is gathered from the backend."""
+    config = make_config({"data/": {"cache": "writethrough"}, "meta/": {"cache": "mirror"}})
+    store, _ = make_store(tmp_path, config=config)
+    store.create()
+
+    def stats_delta(before, keys):
+        return {key: store.stats.get(key, 0) - before.get(key, 0) for key in keys}
+
+    try:
+        with store:
+            store.store("data/00000000", b"0123456789")
+            store.store("meta/00000000", b"abcdefghij")
+            store.store("config/00000000", b"ABCDEFGHIJ")
+            store.cache_invalidate("data/00000000")
+            store.cache_invalidate("meta/00000000")
+            keys = ["cache_hits", "cache_misses", "cache_store_calls", "backend_load_calls", "backend_gather_calls"]
+
+            # writethrough: the first range misses the cache and loads the whole item into it,
+            # the second range of the same item is already served from the cache.
+            before = store.stats
+            assert store.gather([("00000000", 2, 3), ("00000000", 7, 2)], namespace="data") == b"23478"
+            assert stats_delta(before, keys) == dict(
+                cache_hits=1, cache_misses=1, cache_store_calls=1, backend_load_calls=1, backend_gather_calls=0
+            )
+            # writethrough: cache hits now
+            before = store.stats
+            assert store.gather([("00000000", 2, 3), ("00000000", 7, 2)], namespace="data") == b"23478"
+            assert stats_delta(before, keys) == dict(
+                cache_hits=2, cache_misses=0, cache_store_calls=0, backend_load_calls=0, backend_gather_calls=0
+            )
+            # short read from the cached item
+            with pytest.raises(store_module.ReadRangeError):
+                store.gather([("00000000", 7, 20)], namespace="data")
+
+            # mirror: always loaded from the primary (and cached)
+            before = store.stats
+            assert store.gather([("00000000", 5, 2)], namespace="meta") == b"fg"
+            assert stats_delta(before, keys) == dict(
+                cache_hits=0, cache_misses=0, cache_store_calls=1, backend_load_calls=1, backend_gather_calls=0
+            )
+
+            # not cached: gathered from the backend with one call
+            before = store.stats
+            assert store.gather([("00000000", 1, 2), ("00000000", 8, 2)], namespace="config") == b"BCIJ"
+            assert stats_delta(before, keys) == dict(
+                cache_hits=0, cache_misses=0, cache_store_calls=0, backend_load_calls=0, backend_gather_calls=1
+            )
+            assert stats_delta(before, ["backend_gather_volume", "gather_volume"]) == dict(
+                backend_gather_volume=4, gather_volume=4
+            )
+
+            # mixed (no namespace: item names include the namespace): the order of the ranges is kept
+            before = store.stats
+            sources = [("config/00000000", 0, 2), ("data/00000000", 0, 2), ("config/00000000", 8, 2)]
+            assert store.gather(sources) == b"AB01IJ"
+            assert stats_delta(before, keys) == dict(
+                cache_hits=1, cache_misses=0, cache_store_calls=0, backend_load_calls=0, backend_gather_calls=1
+            )
+            assert stats_delta(before, ["backend_gather_volume", "gather_volume"]) == dict(
+                backend_gather_volume=4, gather_volume=6
+            )
+    finally:
+        store.destroy()

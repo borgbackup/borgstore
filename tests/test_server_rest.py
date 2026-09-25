@@ -329,6 +329,53 @@ def test_rest_server_hash_blake3(rest_server_with_auth):
         be.close()
 
 
+def test_rest_server_gather(tmp_path):
+    backend_url = tmp_path.as_uri()
+    address, port = "127.0.0.1", 0
+    username, password = "testuser", "testpassword"
+
+    server, thread = start_server(backend_url, address, port, username, password)
+    host, assigned_port = server.server_address
+    url = f"http://{host}:{assigned_port}/"
+    headers = {"Accept": "application/vnd.x.borgstore.rest.v1"}
+    auth = (username, password)
+
+    try:
+        requests.post(url + "?cmd=create", auth=auth, headers=headers).raise_for_status()
+        requests.post(url + "file1", data=b"0123456789", auth=auth, headers=headers).raise_for_status()
+        requests.post(url + "file2", data=b"abcdefghij", auth=auth, headers=headers).raise_for_status()
+
+        # gather "234" from file1 (offset 2, size 3) and "fg" from file2 (offset 5, size 2)
+        sources = [("file1", 2, 3), ("file2", 5, 2)]
+        response = requests.post(url + "?cmd=gather", data=json.dumps(sources), auth=auth, headers=headers)
+        response.raise_for_status()
+        assert response.status_code == 200
+        assert response.headers["Content-Type"] == "application/octet-stream"
+        assert response.content == b"234fg"
+
+        # empty list
+        response = requests.post(url + "?cmd=gather", data=json.dumps([]), auth=auth, headers=headers)
+        response.raise_for_status()
+        assert response.content == b""
+
+        # short read
+        response = requests.post(url + "?cmd=gather", data=json.dumps([("file1", 2, 20)]), auth=auth, headers=headers)
+        assert response.status_code == 416
+        assert "requested 20 bytes" in response.text
+
+        # nonexistent source
+        response = requests.post(url + "?cmd=gather", data=json.dumps([("file3", 0, 1)]), auth=auth, headers=headers)
+        assert response.status_code == 404
+
+        # invalid json / invalid sources
+        for body in [b"this is not json", json.dumps([("file1", 0)]), json.dumps([("file1", 0, "3")])]:
+            response = requests.post(url + "?cmd=gather", data=body, auth=auth, headers=headers)
+            assert response.status_code == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_rest_server_defrag(tmp_path):
     backend_url = tmp_path.as_uri()
     address, port = "127.0.0.1", 0
@@ -430,6 +477,31 @@ def test_rest_server_defrag(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_rest_backend_gather(rest_server_with_auth):
+    be = rest_server_with_auth
+    be.create()
+    be.open()
+    try:
+        be.store("file1", b"0123456789")
+        be.store("file2", b"abcdefghij")
+
+        sources = [("file2", 5, 2), ("file1", 2, 3), ("file1", 0, 1), ("file2", -3, 3)]
+        assert be.gather(sources) == b"fg234" + b"0" + b"hij"
+        assert be.gather([]) == b""
+
+        with pytest.raises(ReadRangeError) as exc_info:
+            be.gather([("file1", 2, 20)])
+        assert "requested 20 bytes" in str(exc_info.value)
+
+        with pytest.raises(ObjectNotFound):
+            be.gather([("file1", 0, 1), ("file3", 0, 1)])
+
+        with pytest.raises(ValueError):
+            be.gather([("file1", 0, None)])
+    finally:
+        be.close()
 
 
 def test_rest_backend_defrag(rest_server_with_auth):
