@@ -295,7 +295,8 @@ class PosixFS(BackendBase):
 
     def move(self, curr_name, new_name):
         def _rename_to_new_name():
-            curr_path.rename(new_path)
+            # replace() (not rename()) so an existing destination also gets replaced on Windows.
+            curr_path.replace(new_path)
 
         if not self.opened:
             raise BackendMustBeOpen()
