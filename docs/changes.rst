@@ -10,6 +10,12 @@ New features:
   The REST backend does it with one roundtrip (server-side gather), other backends
   do one partial load per range.
 
+Fixes:
+
+- caching: a partial load with a negative offset from a cached namespace returned
+  wrong data (e.g. nothing for the last N bytes of an item) if the item was loaded
+  from the primary backend (mirror mode, or a cache miss in writethrough mode).
+
 Other changes:
 
 - defrag: implemented on top of gather.

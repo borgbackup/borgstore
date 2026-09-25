@@ -600,6 +600,10 @@ class Store:
             lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
         )
         self._cache_store(nested_name, full_value)
+        if offset < 0:
+            # a negative offset counts from the end of the item. make it absolute, otherwise the end of
+            # the slice (offset + size) is not right: a range ending at the end of the item would be empty.
+            offset = max(len(full_value) + offset, 0)
         return full_value[offset : (None if size is None else offset + size)]
 
     @_locked

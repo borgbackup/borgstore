@@ -1332,3 +1332,24 @@ def test_cache_gather(tmp_path):
             )
     finally:
         store.destroy()
+
+
+@pytest.mark.parametrize("mode", ["writethrough", "mirror"])
+def test_cache_load_negative_offset(tmp_path, mode):
+    """A negative offset counts from the end of the item, also if the item is loaded from the primary backend."""
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": mode}}))
+    store.create()
+    try:
+        with store:
+            name = "data/00000000"
+            store.store(name, b"0123456789")
+            for offset, size, expected in [(-3, 3, b"789"), (-3, 2, b"78"), (-3, None, b"789")]:
+                store.cache_invalidate(name)
+                # writethrough: the first load is a cache miss (loads from the primary), the second a cache hit.
+                # mirror: both load from the primary.
+                assert store.load(name, offset=offset, size=size) == expected
+                assert store.load(name, offset=offset, size=size) == expected
+            store.cache_invalidate(name)
+            assert store.gather([("00000000", -3, 3), ("00000000", 0, 1)], namespace="data") == b"7890"
+    finally:
+        store.destroy()
