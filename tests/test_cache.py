@@ -1319,17 +1319,6 @@ def test_cache_gather(tmp_path):
             assert stats_delta(before, ["backend_gather_volume", "gather_volume"]) == dict(
                 backend_gather_volume=4, gather_volume=4
             )
-
-            # mixed (no namespace: item names include the namespace): the order of the ranges is kept
-            before = store.stats
-            sources = [("config/00000000", 0, 2), ("data/00000000", 0, 2), ("config/00000000", 8, 2)]
-            assert store.gather(sources) == b"AB01IJ"
-            assert stats_delta(before, keys) == dict(
-                cache_hits=1, cache_misses=0, cache_store_calls=0, backend_load_calls=0, backend_gather_calls=1
-            )
-            assert stats_delta(before, ["backend_gather_volume", "gather_volume"]) == dict(
-                backend_gather_volume=4, gather_volume=6
-            )
     finally:
         store.destroy()
 

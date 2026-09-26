@@ -219,6 +219,25 @@ def test_gather_nested(posixfs_store_created):
         assert store.gather([("file1", 2, 3)], namespace=ns, deleted=True) == b"234"
 
 
+def test_gather_defrag_one_namespace(posixfs_store_created):
+    # all items must be in the given namespace, so item names must not contain "/".
+    with posixfs_store_created as store:
+        store.store("one/file1", b"0123456789")
+        store.store("two/file2", b"abcdefghij")
+        # an item of the namespace works:
+        assert store.gather([("file1", 2, 3)], namespace="one") == b"234"
+        assert store.defrag([("file1", 2, 3)], target="target", namespace="one") == "target"
+        # an item of another namespace (or an item name including the namespace) is rejected:
+        for namespace, name in [("one", "../two/file2"), (None, "two/file2"), (None, "one/file1")]:
+            with pytest.raises(ValueError, match="must not contain '/'"):
+                store.gather([(name, 2, 3)], namespace=namespace)
+            with pytest.raises(ValueError, match="must not contain '/'"):
+                store.defrag([(name, 2, 3)], target="target", namespace=namespace)
+        # also for the defrag target:
+        with pytest.raises(ValueError, match="must not contain '/'"):
+            store.defrag([("file1", 2, 3)], target="two/target", namespace="one")
+
+
 @pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")
 def test_defrag_nested_blake3(posixfs_store_created):
     ns = "two"  # nested! CONFIG has {"two/": {"levels": [2]}}

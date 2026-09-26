@@ -18,6 +18,7 @@ API can be much simpler:
   namespace) with one call, returning their contents concatenated in the order
   given. The caller knows the sizes it requested, so it can split the result
   (e.g. into memoryview slices). A short read raises ``ReadRangeError``.
+  The namespace is given separately, the item names must not contain "/".
 - info: get information about an item via its key (exists, size, ...).
 - hash: computes the hexdigest for the content of an item (given its key).
   Supported algorithms are all algorithms supported by ``hashlib`` (e.g.
@@ -26,9 +27,10 @@ API can be much simpler:
 - delete: immediately remove an item from the store (given its key).
 - move: implements renaming, soft delete/undelete, and moving to the current
   nesting level.
-- defrag: general purpose defragmentation helper (copies blocks to new items).
-  If the target name is computed from the content, the same algorithms as for
-  hash are supported.
+- defrag: general purpose defragmentation helper (copies blocks to new items
+  in the same namespace). The namespace is given separately, the item names
+  must not contain "/". If the target name is computed from the content, the
+  same algorithms as for hash are supported.
 - quota: return quota limit and usage (-1 if quotas not enabled or not supported)
 - stats: API call counters, time spent in API methods, data volume/throughput.
 - latency/bandwidth emulator: see :ref:`store-latency-bandwidth-emulator`.

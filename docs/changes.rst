@@ -19,6 +19,8 @@ Fixes:
 Other changes:
 
 - defrag: implemented on top of gather.
+- Store.defrag / Store.gather: all items must be in the given namespace, a "/" in
+  an item name (or the defrag target name) raises ValueError.
 
 
 Version 0.6.4 (2026-09-24)
