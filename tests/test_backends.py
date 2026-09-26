@@ -35,6 +35,7 @@ from borgstore.backends.errors import (
     BackendMustBeOpen,
     BackendMustNotBeOpen,
     ObjectNotFound,
+    ReadRangeError,
 )
 from borgstore.backends.posixfs import PosixFS, get_file_backend
 from borgstore.backends.sftp import Sftp, get_sftp_backend
@@ -958,6 +959,34 @@ def test_posixfs_failed_write_leaves_no_tmpfile(posixfs_backend_created, size):
         backend.store("key", b"x" * size)
         assert backend.load("key") == b"x" * size
         assert list_names(backend, ROOTNS) == ["key"]
+
+
+def test_gather(tested_backends, request):
+    backend = get_backend_from_fixture(tested_backends, request)
+    with backend:
+        backend.store("test/item1", b"0123456789")
+        backend.store("test/item2", b"abcdefghij")
+        sources = [("test/item2", 5, 2), ("test/item1", 2, 3), ("test/item1", 0, 1), ("test/item2", -3, 3)]
+        assert backend.gather(sources) == b"fg234" + b"0" + b"hij"
+        assert backend.gather(source for source in sources) == b"fg234" + b"0" + b"hij"
+        assert backend.gather([]) == b""
+        assert backend.gather([("test/item1", 0, 0)]) == b""
+
+        # short read
+        with pytest.raises(ReadRangeError):
+            backend.gather([("test/item1", 2, 3), ("test/item2", 5, 20)])
+
+        # nonexistent object
+        with pytest.raises(ObjectNotFound):
+            backend.gather([("test/item1", 0, 1), ("test/nonexistent", 0, 1)])
+
+        # invalid sources
+        with pytest.raises(ValueError):
+            backend.gather([("test/item1", 0, None)])
+
+    # Test must be open
+    with pytest.raises(BackendMustBeOpen):
+        backend.gather([("test/item1", 0, 1)])
 
 
 def test_hash(tested_backends, request):

@@ -17,7 +17,7 @@ from .test_backends import get_s3_test_backend, s3_is_available  # noqa
 from .test_backends import blake3, blake3_is_available
 
 from borgstore.constants import ROOTNS
-from borgstore.store import Store, ItemInfo, ReadRangeError
+from borgstore.store import Store, ItemInfo, ObjectNotFound, ReadRangeError
 
 CONFIG = {"zero/": {"levels": [0]}, "one/": {"levels": [1]}, "two/": {"levels": [2]}}  # Layout used for most tests
 
@@ -159,6 +159,64 @@ def test_defrag_nested(posixfs_store_created):
             store.defrag([("file1", 2, 20)], target="target2", namespace=ns)
         assert "Read range error from" in str(exc_info.value)
         assert "requested 20 bytes" in str(exc_info.value)
+
+
+def test_gather_nested(posixfs_store_created):
+    ns = "two"  # nested! CONFIG has {"two/": {"levels": [2]}}
+    v1 = b"0123456789"
+    v2 = b"abcdefghij"
+    with posixfs_store_created as store:
+        # the stats have the gather keys, even if gather was not called yet
+        assert store.stats["gather_calls"] == 0
+        assert store.stats["backend_gather_calls"] == 0
+        assert store.stats["backend_gather_volume"] == 0
+
+        store.store(ns + "/file1", v1)
+        store.store(ns + "/file2", v2)
+
+        # ranges from multiple items, multiple ranges from the same item, order is kept
+        sources = [("file2", 5, 2), ("file1", 2, 3), ("file1", 0, 1), ("file2", -3, 3)]
+        assert store.gather(sources, namespace=ns) == b"fg" + b"234" + b"0" + b"hij"
+        assert store.stats["gather_calls"] == 1
+        assert store.stats["gather_volume"] == 9
+        assert store.stats["backend_gather_calls"] == 1
+        assert store.stats["backend_gather_volume"] == 9
+
+        # the caller can split the result, knowing the sizes
+        data = memoryview(store.gather(sources, namespace=ns))
+        pieces, pos = [], 0
+        for _, _, size in sources:
+            pieces.append(bytes(data[pos : pos + size]))
+            pos += size
+        assert pieces == [b"fg", b"234", b"0", b"hij"]
+
+        # a generator works, too (validating the sources must not consume them)
+        assert store.gather((source for source in sources), namespace=ns) == b"fg234" + b"0" + b"hij"
+
+        # empty ranges and an empty list
+        assert store.gather([("file1", 3, 0)], namespace=ns) == b""
+        assert store.gather([], namespace=ns) == b""
+
+        # short read
+        with pytest.raises(ReadRangeError) as exc_info:
+            store.gather([("file1", 2, 3), ("file2", 5, 20)], namespace=ns)
+        assert "Read range error from" in str(exc_info.value)
+        assert "requested 20 bytes" in str(exc_info.value)
+
+        # unknown item
+        with pytest.raises(ObjectNotFound):
+            store.gather([("file1", 0, 1), ("nonexistent", 0, 1)], namespace=ns)
+
+        # invalid sources
+        for sources in [[("file1", 0)], [("file1", "0", 1)], [("file1", 0, -1)], [("file1", 0, None)]]:
+            with pytest.raises(ValueError):
+                store.gather(sources, namespace=ns)
+
+        # soft-deleted item
+        store.move(ns + "/file1", delete=True)
+        with pytest.raises(ObjectNotFound):
+            store.gather([("file1", 2, 3)], namespace=ns)
+        assert store.gather([("file1", 2, 3)], namespace=ns, deleted=True) == b"234"
 
 
 @pytest.mark.skipif(not blake3_is_available, reason="blake3 package is not installed")

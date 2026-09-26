@@ -12,6 +12,7 @@ cloud storage servers:
   hashsum (from http header X-Content-hash-sha256)
 - server-side hash computation (e.g. sha256, or blake3 if the optional ``blake3``
   package is installed on the server) for item content
+- server-side gather (reads multiple byte ranges from multiple items with one request)
 - server-side defragmentation helper (copies blocks to new items)
 
 Running the server on host:port

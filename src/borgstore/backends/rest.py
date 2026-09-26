@@ -29,7 +29,7 @@ try:
 except ImportError:
     pass
 
-from ._base import BackendBase, ItemInfo, validate_name, validate_value, StoreValue
+from ._base import BackendBase, ItemInfo, validate_name, validate_value, validate_sources, StoreValue
 from ._utils import make_range_header, ignore_sigint
 from .errors import (
     ObjectNotFound,
@@ -582,6 +582,17 @@ class REST(BackendBase):
         validate_name(new_name)
         response = self._request("post", self._url(""), params={"cmd": "move", "current": curr_name, "new": new_name})
         self._handle_response(response, f"{curr_name} -> {new_name}")
+
+    @with_reconnect
+    def gather(self, sources) -> bytes:
+        self._assert_open()
+        sources = validate_sources(sources)
+        for name, _, _ in sources:
+            validate_name(name)
+        data = json.dumps(sources).encode("utf-8")
+        response = self._request("post", self._url(""), params={"cmd": "gather"}, data=data)
+        self._handle_response(response, "gather")
+        return response.content
 
     @with_reconnect
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, levels=0) -> str:

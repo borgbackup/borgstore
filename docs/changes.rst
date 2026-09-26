@@ -1,6 +1,26 @@
 Changelog
 =========
 
+Version 0.7.0 (not released yet)
+--------------------------------
+
+New features:
+
+- gather: read multiple byte ranges (from one or multiple items) with one call, #211.
+  The REST backend does it with one roundtrip (server-side gather), other backends
+  do one partial load per range.
+
+Fixes:
+
+- caching: a partial load with a negative offset from a cached namespace returned
+  wrong data (e.g. nothing for the last N bytes of an item) if the item was loaded
+  from the primary backend (mirror mode, or a cache miss in writethrough mode).
+
+Other changes:
+
+- defrag: implemented on top of gather.
+
+
 Version 0.6.4 (2026-09-24)
 --------------------------
 

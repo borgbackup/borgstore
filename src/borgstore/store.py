@@ -22,7 +22,7 @@ import time
 from typing import Generator, Iterator, NamedTuple, Optional
 
 from .utils.nesting import nest, unnest
-from .backends._base import ItemInfo, BackendBase, StoreValue, validate_value
+from .backends._base import ItemInfo, BackendBase, StoreValue, validate_value, validate_sources
 from .backends.errors import ObjectNotFound, NoBackendGiven, BackendURLInvalid, ReadRangeError  # noqa
 from .backends.posixfs import get_file_backend
 from .backends.rclone import get_rclone_backend
@@ -469,19 +469,21 @@ class Store:
         - Write buffering or cached reads might give a wrong impression.
         """
         st = dict(self._stats)  # copy Counter -> generic dict
-        for key in "info", "load", "store", "delete", "move", "list":
+        for key in "info", "load", "store", "delete", "move", "list", "gather":
             # make sure key is present, even if method was not called
             st[f"{key}_calls"] = st.get(f"{key}_calls", 0)
             # convert integer ns timings to float s
             st[f"{key}_time"] = st.get(f"{key}_time", 0) / 1e9
-        for key in "load", "store":
+        for key in "load", "store", "gather":
             v = st.get(f"{key}_volume", 0)
             t = st.get(f"{key}_time", 0)
             st[f"{key}_throughput"] = v / t if t else 0
         st["backend_load_calls"] = st.get("backend_load_calls", 0)
+        st["backend_gather_calls"] = st.get("backend_gather_calls", 0)
         st["backend_store_calls"] = st.get("backend_store_calls", 0)
         st["backend_delete_calls"] = st.get("backend_delete_calls", 0)
         st["backend_load_volume"] = st.get("backend_load_volume", 0)
+        st["backend_gather_volume"] = st.get("backend_gather_volume", 0)
         st["backend_store_volume"] = st.get("backend_store_volume", 0)
         st["cache_disabled"] = self._cache_disabled
         st["cache_hits"] = st.get("cache_hits", 0)
@@ -575,36 +577,92 @@ class Store:
         with self._stats_updater("load", f"load({name!r}, offset={offset}, size={size}, deleted={deleted})"):
             cache_policy = self._cache_policy_for(name)
             nested_name = self.find(name, deleted=deleted)
-            if cache_policy.mode == CacheMode.C_WRITETHROUGH:
-                # try a partial read from the cache first, matching the requested range.
-                cached_value = self._cache_load(nested_name, size=size, offset=offset)
-                if cached_value is not None:
-                    self._stats_update_volume("load", len(cached_value))
-                    return cached_value
-                # cache miss: do a full load from the primary backend and populate the cache.
-                full_value = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=None, offset=0),
-                    key="load",
-                    volume=lambda value: len(value),
-                )
-                self._cache_store(nested_name, full_value)
-            elif cache_policy.mode == CacheMode.C_MIRROR:
-                full_value = self._backend_call(
-                    lambda: self.backend.load(nested_name, size=None, offset=0),
-                    key="load",
-                    volume=lambda value: len(value),
-                )
-                self._cache_store(nested_name, full_value)
+            if cache_policy.mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                result = self._cached_load(nested_name, cache_policy.mode, size=size, offset=offset)
             else:
                 result = self._backend_call(
                     lambda: self.backend.load(nested_name, size=size, offset=offset),
                     key="load",
                     volume=lambda value: len(value),
                 )
-                self._stats_update_volume("load", len(result))
-                return result
-            result = full_value[offset : (None if size is None else offset + size)]
             self._stats_update_volume("load", len(result))
+            return result
+
+    def _cached_load(self, nested_name: str, mode: CacheMode, *, size=None, offset=0) -> bytes:
+        """load (a range of) the value of an item in a cached namespace, see load."""
+        if mode == CacheMode.C_WRITETHROUGH:
+            # try a partial read from the cache first, matching the requested range.
+            cached_value = self._cache_load(nested_name, size=size, offset=offset)
+            if cached_value is not None:
+                return cached_value
+        # cache miss (or mirror mode): do a full load from the primary backend and populate the cache.
+        full_value = self._backend_call(
+            lambda: self.backend.load(nested_name, size=None, offset=0), key="load", volume=lambda value: len(value)
+        )
+        self._cache_store(nested_name, full_value)
+        if offset < 0:
+            # a negative offset counts from the end of the item. make it absolute, otherwise the end of
+            # the slice (offset + size) is not right: a range ending at the end of the item would be empty.
+            offset = max(len(full_value) + offset, 0)
+        return full_value[offset : (None if size is None else offset + size)]
+
+    @_locked
+    def gather(self, sources, *, namespace=None, deleted=False) -> bytes:
+        """
+        read multiple byte ranges (from one or multiple items in the same namespace) and return
+        their contents concatenated, in the order given. item names are always without namespace.
+
+        sources is a list of (name, offset, size) tuples, as for defrag. size must be given
+        (an int), a short read raises ReadRangeError. the caller knows the sizes it requested,
+        so it can split the result (e.g. into memoryview slices).
+
+        a backend that supports it (e.g. rest) reads all the ranges with one roundtrip, while
+        a partial load per range would cost one roundtrip each.
+        """
+        sources = validate_sources(sources)
+        with self._stats_updater(
+            "gather", f"gather({len(sources)} ranges, namespace={namespace!r}, deleted={deleted})"
+        ):
+            prefix = (namespace + "/") if namespace else ""
+            nested_names = {}
+            for name, _, _ in sources:
+                if name not in nested_names:
+                    nested_names[name] = self.find(prefix + name, deleted=deleted)
+            # ranges of items in a cached namespace are read like load does it (from the cache, or by
+            # loading the whole item and caching it), all other ranges are gathered from the backend
+            # with one call.
+            parts: list = [None] * len(sources)
+            backend_sources = []
+            for i, (name, offset, size) in enumerate(sources):
+                mode = self._cache_policy_for(prefix + name).mode
+                if mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                    part = self._cached_load(nested_names[name], mode, size=size, offset=offset)
+                    if len(part) != size:
+                        raise ReadRangeError(
+                            f"Read range error from {name} (requested {size} bytes at offset {offset}, got {len(part)})"
+                        )
+                    parts[i] = part
+                else:
+                    backend_sources.append((nested_names[name], offset, size))
+            gathered = b""
+            if backend_sources:
+                gathered = self._backend_call(
+                    lambda: self.backend.gather(backend_sources), key="gather", volume=lambda value: len(value)
+                )
+                expected_size = sum(size for _, _, size in backend_sources)
+                if len(gathered) != expected_size:
+                    raise ReadRangeError(
+                        f"Read range error: gather returned {len(gathered)} bytes, expected {expected_size}"
+                    )
+            if len(backend_sources) == len(sources):
+                result = gathered  # the usual case: no copy needed
+            else:
+                view, pos = memoryview(gathered), 0
+                for i, (_, _, size) in enumerate(sources):
+                    if parts[i] is None:
+                        parts[i], pos = view[pos : pos + size], pos + size
+                result = b"".join(parts)
+            self._stats_update_volume("gather", len(result))
             return result
 
     def _cache_store(self, nested_name: str, value: StoreValue) -> None:

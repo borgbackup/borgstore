@@ -225,6 +225,20 @@ class BorgStoreRESTRequestHandler(BaseHTTPRequestHandler):
                 self._handle_exception(e, "quota")
             return
 
+        if cmd == "gather":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                sources = json.loads(body)
+                with self.server.backend_lock, self.server.backend:
+                    data = self.server.backend.gather(sources)
+                self.respond(HTTP.OK, data=data, content_type="application/octet-stream")
+            except ValueError as e:
+                self.send_error(HTTP.BAD_REQUEST, str(e))
+            except Exception as e:
+                self._handle_exception(e, "gather")
+            return
+
         if cmd == "defrag":
             target = self.query.get("target", [None])[0]
             algorithm = self.query.get("algorithm", [None])[0]

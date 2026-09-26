@@ -186,6 +186,7 @@ Use a storage backend running inside a BorgStore REST server process:
 - Authentication: Optional Basic Auth is supported.
 - hash: runs the hexdigest computation server-side. Using algorithm "blake3" requires
   the optional ``blake3`` package to be installed **on the server**.
+- gather: runs server-side, all ranges are read with one roundtrip.
 - defrag: runs the defragmentation helper server-side.
 - atime / mtime: supported (if backend used by server supports it). mtime is stamped
   by the server side (the store operation executes there).
