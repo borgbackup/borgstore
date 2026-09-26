@@ -1,8 +1,8 @@
 Changelog
 =========
 
-Version 0.7.0 (not released yet)
---------------------------------
+Version 0.7.0 (2026-09-26)
+--------------------------
 
 New features:
 
@@ -15,10 +15,12 @@ Fixes:
 - caching: a partial load with a negative offset from a cached namespace returned
   wrong data (e.g. nothing for the last N bytes of an item) if the item was loaded
   from the primary backend (mirror mode, or a cache miss in writethrough mode).
+- posixfs: "move" replaces an existing destination also on Windows
+
 
 Other changes:
 
-- defrag: implemented on top of gather.
+- defrag: implement it on top of gather.
 - Store.defrag / Store.gather: all items must be in the given namespace, a "/" in
   an item name (or the defrag target name) raises ValueError.
 
