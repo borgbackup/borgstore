@@ -610,60 +610,68 @@ class Store:
     def gather(self, sources, *, namespace=None, deleted=False) -> bytes:
         """
         read multiple byte ranges (from one or multiple items in the same namespace) and return
-        their contents concatenated, in the order given. item names are always without namespace.
+        their contents concatenated, in the order given.
 
-        sources is a list of (name, offset, size) tuples, as for defrag. size must be given
-        (an int), a short read raises ReadRangeError. the caller knows the sizes it requested,
+        sources is a list of (name, offset, size) tuples, as for defrag: all items must be in the
+        given namespace, item names are without namespace and must not contain "/". size must be
+        given (an int), a short read raises ReadRangeError. the caller knows the sizes it requested,
         so it can split the result (e.g. into memoryview slices).
 
         a backend that supports it (e.g. rest) reads all the ranges with one roundtrip, while
         a partial load per range would cost one roundtrip each.
         """
-        sources = validate_sources(sources)
+        mapped_sources = self._find_sources(sources, namespace=namespace, deleted=deleted)
         with self._stats_updater(
-            "gather", f"gather({len(sources)} ranges, namespace={namespace!r}, deleted={deleted})"
+            "gather", f"gather({len(mapped_sources)} ranges, namespace={namespace!r}, deleted={deleted})"
         ):
             prefix = (namespace + "/") if namespace else ""
-            nested_names = {}
-            for name, _, _ in sources:
-                if name not in nested_names:
-                    nested_names[name] = self.find(prefix + name, deleted=deleted)
-            # ranges of items in a cached namespace are read like load does it (from the cache, or by
-            # loading the whole item and caching it), all other ranges are gathered from the backend
-            # with one call.
-            parts: list = [None] * len(sources)
-            backend_sources = []
-            for i, (name, offset, size) in enumerate(sources):
-                mode = self._cache_policy_for(prefix + name).mode
-                if mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
-                    part = self._cached_load(nested_names[name], mode, size=size, offset=offset)
+            mode = self._cache_policy_for(prefix).mode
+            if mode in {CacheMode.C_WRITETHROUGH, CacheMode.C_MIRROR}:
+                # cached namespace: read the ranges like load does it (from the cache, or by
+                # loading the whole item and caching it).
+                parts = []
+                for nested_name, offset, size in mapped_sources:
+                    part = self._cached_load(nested_name, mode, size=size, offset=offset)
                     if len(part) != size:
                         raise ReadRangeError(
-                            f"Read range error from {name} (requested {size} bytes at offset {offset}, got {len(part)})"
+                            f"Read range error from {nested_name} "
+                            f"(requested {size} bytes at offset {offset}, got {len(part)})"
                         )
-                    parts[i] = part
-                else:
-                    backend_sources.append((nested_names[name], offset, size))
-            gathered = b""
-            if backend_sources:
-                gathered = self._backend_call(
-                    lambda: self.backend.gather(backend_sources), key="gather", volume=lambda value: len(value)
-                )
-                expected_size = sum(size for _, _, size in backend_sources)
-                if len(gathered) != expected_size:
-                    raise ReadRangeError(
-                        f"Read range error: gather returned {len(gathered)} bytes, expected {expected_size}"
-                    )
-            if len(backend_sources) == len(sources):
-                result = gathered  # the usual case: no copy needed
-            else:
-                view, pos = memoryview(gathered), 0
-                for i, (_, _, size) in enumerate(sources):
-                    if parts[i] is None:
-                        parts[i], pos = view[pos : pos + size], pos + size
+                    parts.append(part)
                 result = b"".join(parts)
+            elif mapped_sources:
+                # gather all ranges from the backend with one call.
+                result = self._backend_call(
+                    lambda: self.backend.gather(mapped_sources), key="gather", volume=lambda value: len(value)
+                )
+                expected_size = sum(size for _, _, size in mapped_sources)
+                if len(result) != expected_size:
+                    raise ReadRangeError(
+                        f"Read range error: gather returned {len(result)} bytes, expected {expected_size}"
+                    )
+            else:
+                result = b""
             self._stats_update_volume("gather", len(result))
             return result
+
+    def _find_sources(self, sources, *, namespace, deleted) -> list:
+        """
+        validate the sources of gather / defrag and return them with the nested (backend) item names.
+
+        all items must be in the given namespace: a "/" in an item name is rejected, because such an
+        item could be in a deeper namespace (with other nesting levels and cache policy).
+        """
+        sources = validate_sources(sources)
+        prefix = (namespace + "/") if namespace else ""
+        nested_names: dict[str, str] = {}
+        mapped_sources = []
+        for name, offset, size in sources:
+            if name not in nested_names:
+                if "/" in name:
+                    raise ValueError(f"item name must not contain '/' (namespace is given separately): {name!r}")
+                nested_names[name] = self.find(prefix + name, deleted=deleted)
+            mapped_sources.append((nested_names[name], offset, size))
+        return mapped_sources
 
     def _cache_store(self, nested_name: str, value: StoreValue) -> None:
         if self.cache_backend is None or self._cache_disabled:
@@ -945,7 +953,8 @@ class Store:
     def defrag(self, sources, *, target=None, algorithm=None, namespace=None, deleted=False) -> str:
         """
         efficiently create a new item (target) by combining blocks from existing items (sources)
-        in the same namespace. item and target names are always without namespace.
+        in the same namespace. all items must be in the given namespace, item and target names are
+        without namespace and must not contain "/".
 
         sources is a list of (name, block_offset, block_length) tuples. blocks will be processed
         in order of appearance in the list and their contents will be appended to the target item.
@@ -957,10 +966,10 @@ class Store:
         returns the target name.
         """
         prefix = (namespace + "/") if namespace else ""
-        mapped_sources = [
-            (self.find(prefix + source, deleted=deleted), offset, size) for source, offset, size in sources
-        ]
+        mapped_sources = self._find_sources(sources, namespace=namespace, deleted=deleted)
         if target is not None:
+            if "/" in target:
+                raise ValueError(f"item name must not contain '/' (namespace is given separately): {target!r}")
             target = self.find(prefix + target, deleted=deleted)
 
         # Note: defrag does not interact with the cache. It creates a new item from
