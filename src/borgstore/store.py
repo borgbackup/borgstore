@@ -485,17 +485,22 @@ class Store:
         st["backend_load_volume"] = st.get("backend_load_volume", 0)
         st["backend_gather_volume"] = st.get("backend_gather_volume", 0)
         st["backend_store_volume"] = st.get("backend_store_volume", 0)
-        st["cache_disabled"] = self._cache_disabled
-        st["cache_hits"] = st.get("cache_hits", 0)
-        st["cache_misses"] = st.get("cache_misses", 0)
-        cache_total = st["cache_hits"] + st["cache_misses"]
-        st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
-        st["cache_errors"] = st.get("cache_errors", 0)
-        st["cache_load_calls"] = st.get("cache_load_calls", 0)
-        st["cache_store_calls"] = st.get("cache_store_calls", 0)
-        st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
-        st["cache_load_volume"] = st.get("cache_load_volume", 0)
-        st["cache_store_volume"] = st.get("cache_store_volume", 0)
+        # True only if a cache backend is configured and it is not disabled at runtime.
+        st["cache_enabled"] = self.cache_backend is not None and not self._cache_disabled
+        if self.cache_backend is not None:
+            # the other cache stats only make sense if a cache is configured at all.
+            # cache_disabled is True if the cache backend failed to open at runtime.
+            st["cache_disabled"] = self._cache_disabled
+            st["cache_hits"] = st.get("cache_hits", 0)
+            st["cache_misses"] = st.get("cache_misses", 0)
+            cache_total = st["cache_hits"] + st["cache_misses"]
+            st["cache_hit_ratio"] = st["cache_hits"] / cache_total if cache_total else 0
+            st["cache_errors"] = st.get("cache_errors", 0)
+            st["cache_load_calls"] = st.get("cache_load_calls", 0)
+            st["cache_store_calls"] = st.get("cache_store_calls", 0)
+            st["cache_delete_calls"] = st.get("cache_delete_calls", 0)
+            st["cache_load_volume"] = st.get("cache_load_volume", 0)
+            st["cache_store_volume"] = st.get("cache_store_volume", 0)
         return st
 
     def _get_levels(self, name):

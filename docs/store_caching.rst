@@ -165,14 +165,22 @@ Limitations
 Statistics
 ----------
 
-``Store.stats`` includes cache counters:
+``Store.stats`` includes counters for the primary backend:
 
 - ``backend_load_volume``
 - ``backend_store_volume``
 - ``backend_load_calls``
 - ``backend_store_calls``
 - ``backend_delete_calls``
-- ``cache_disabled``
+
+It also includes cache information:
+
+- ``cache_enabled`` (``True`` if a cache backend is configured and was not
+  disabled at runtime)
+
+If a cache backend is configured, these keys are also present:
+
+- ``cache_disabled`` (``True`` if the cache backend failed to open at runtime)
 - ``cache_hits``
 - ``cache_misses``
 - ``cache_hit_ratio``
@@ -182,3 +190,6 @@ Statistics
 - ``cache_load_calls``
 - ``cache_store_calls``
 - ``cache_delete_calls``
+
+Without a cache backend, ``cache_enabled`` is ``False`` and none of the other
+``cache_*`` keys are present.
