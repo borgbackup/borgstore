@@ -6,6 +6,10 @@ _is_connection_lost helper, ssh_cmd keepalive options and StdioSession's EOF han
 """
 
 import io
+import os
+import signal
+import sys
+import time
 
 import pytest
 
@@ -227,3 +231,51 @@ def test_stdio_request_eof_during_body_raises_connection_error():
     with pytest.raises(BackendConnectionError) as exc_info:
         session.request("GET", "http://stdio-backend/item")
     assert "reading response body" in str(exc_info.value)
+
+
+# a minimal stdio "server": answers each request with "ok", after writing more to stderr than a pipe buffer holds.
+STDERR_FLOOD_SERVER = r"""
+import sys
+while sys.stdin.buffer.readline():
+    while sys.stdin.buffer.readline() not in (b"\r\n", b""):
+        pass
+    sys.stderr.buffer.write((b"y" * 99 + b"\n") * 2000)
+    sys.stderr.buffer.flush()
+    sys.stdout.buffer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+    sys.stdout.buffer.flush()
+"""
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="needs os.fork")
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")  # fork() of a multi-threaded process
+def test_stdio_session_works_in_forked_child():
+    """A session opened before daemonizing (e.g. borg mount) works in the daemon: stderr is still drained
+    (so a server writing lots to stderr does not block) and close() does not hang."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:  # like borg mount before daemonizing
+        try:
+            os.close(r)
+            session = StdioSession(command=[sys.executable, "-c", STDERR_FLOOD_SERVER])
+            session.open()
+            session.request("GET", "http://stdio-backend/item")
+            time.sleep(0.5)  # let the stderr thread block in read(), holding the buffered reader's lock
+            parent_pid = os.getpid()
+            if os.fork() == 0:  # the daemon: the stderr thread does not exist here
+                signal.alarm(10)  # kill the daemon if it hangs (closes w, so the test reads EOF)
+                result = b"fail"
+                try:
+                    while os.getppid() == parent_pid:
+                        time.sleep(0.01)  # wait until our parent (and its stderr thread) is gone
+                    if session.request("GET", "http://stdio-backend/item").content == b"ok":
+                        session.close()
+                        result = b"ok"
+                finally:
+                    os.write(w, result)
+                    os._exit(0)
+        finally:
+            os._exit(0)
+    os.close(w)
+    os.waitpid(pid, 0)
+    with os.fdopen(r, "rb") as f:
+        assert f.read() == b"ok"
