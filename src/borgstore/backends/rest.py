@@ -140,6 +140,7 @@ class StdioSession:
         self.timeout = timeout
         self.process = None
         self._stderr_thread = None
+        self._pid = None  # pid of the process that started the stderr thread
         self._stderr_lines: collections.deque = collections.deque(maxlen=10)  # recent stderr for error messages
 
     def _drain_stderr(self):
@@ -160,12 +161,31 @@ class StdioSession:
             stderr=subprocess.PIPE,
             preexec_fn=ignore_sigint,
         )
+        self._start_stderr_thread()
+
+    def _start_stderr_thread(self):
+        self._pid = os.getpid()
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
+
+    def _check_fork(self):
+        """Restart draining stderr if we are in a forked child process (e.g. a daemonized "borg mount")."""
+        if self._pid is None or self._pid == os.getpid() or self.process is None or self.process.stderr is None:
+            return
+        # Threads do not survive fork(), so nothing drains the server's stderr here and the server would block
+        # once the pipe buffer is full. Also, at fork time, the old stderr thread was blocked reading stderr,
+        # holding the buffered reader's lock, so that reader must not be used or closed here (it would wait
+        # for that lock forever). Thus, read a dup of its fd with a new reader and close the old reader's
+        # unbuffered raw file instead (no lock involved), which also makes the old reader count as closed.
+        old_stderr = self.process.stderr
+        self.process.stderr = open(os.dup(old_stderr.raw.fileno()), "rb")
+        old_stderr.raw.close()
+        self._start_stderr_thread()
 
     def close(self):
         if self.process is None:
             return
+        self._check_fork()
         returncode = None
         try:
             if self.process.stdin is not None:
@@ -201,6 +221,7 @@ class StdioSession:
     def request(self, method, url, params=None, data=None, headers=None, timeout=None):
         if self.process is None or self.process.stdin is None or self.process.stdout is None:
             raise BackendError("stdio session is not open")
+        self._check_fork()
 
         request_headers = dict(self.headers)
         if headers:
