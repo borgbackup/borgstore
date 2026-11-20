@@ -544,13 +544,10 @@ def test_stats(posixfs_store_created):
         store.load(key)
         assert store._stats["load_volume"] == 200
 
-        # Assert default values for cache stats when cache is disabled
+        # Without a cache backend, cache_enabled is False and there are no other cache stats
         stats = store.stats
-        assert stats["cache_load_calls"] == 0
-        assert stats["cache_store_calls"] == 0
-        assert stats["cache_delete_calls"] == 0
-        assert stats["cache_load_volume"] == 0
-        assert stats["cache_store_volume"] == 0
+        assert stats["cache_enabled"] is False
+        assert {k for k in stats if k.startswith("cache_")} == {"cache_enabled"}
 
         # Assert primary backend stats are tracked accurately
         assert stats["backend_store_calls"] == 4

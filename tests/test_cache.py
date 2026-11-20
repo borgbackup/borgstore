@@ -1342,3 +1342,51 @@ def test_cache_load_negative_offset(tmp_path, mode):
             assert store.gather([("00000000", -3, 3), ("00000000", 0, 1)], namespace="data") == b"7890"
     finally:
         store.destroy()
+
+
+def test_stats_without_cache_backend(tmp_path):
+    """No cache configured: cache_enabled is False and there are no other cache stats."""
+    store, _ = make_store(tmp_path, with_cache_backend=False)
+    store.create()
+    try:
+        with store:
+            stats = store.stats
+            assert stats["cache_enabled"] is False
+            assert {key for key in stats if key.startswith("cache_")} == {"cache_enabled"}
+    finally:
+        store.destroy()
+
+
+def test_stats_with_working_cache(tmp_path):
+    """Cache configured and working: cache_enabled is True, the cache counters are present."""
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
+    store.create()
+    try:
+        with store:
+            stats = store.stats
+            assert stats["cache_enabled"] is True
+            assert stats["cache_disabled"] is False
+            assert stats["cache_hits"] == 0
+            assert stats["cache_load_calls"] == 0
+    finally:
+        store.destroy()
+
+
+def test_stats_with_cache_that_fails_to_open(tmp_path):
+    """Cache configured, but opening it failed: cache_enabled is False, cache_disabled is True."""
+    store, _ = make_store(tmp_path, config=make_config({"data/": {"cache": CacheMode.C_WRITETHROUGH}}))
+    store.create()
+
+    def failing_open():
+        raise RuntimeError("boom")
+
+    store.cache_backend.open = failing_open
+    try:
+        with store:
+            stats = store.stats
+            assert stats["cache_enabled"] is False
+            assert stats["cache_disabled"] is True
+            assert stats["cache_hits"] == 0
+            assert stats["cache_errors"] == 0
+    finally:
+        store.destroy()
