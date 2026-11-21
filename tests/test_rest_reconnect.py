@@ -233,6 +233,19 @@ def test_stdio_request_eof_during_body_raises_connection_error():
     assert "reading response body" in str(exc_info.value)
 
 
+def test_stdio_close_after_server_exited_reports_exit_code_and_stderr():
+    """When the server exited before the first request was sent, leaving the context raises the
+    server's exit code and stderr, not a BrokenPipeError from flushing the unsent request on close."""
+    script = "echo 'ssh: connect to host example port 22: Connection refused' >&2; exit 255"
+    with pytest.raises(BackendError) as exc_info:
+        with StdioSession(command=["sh", "-c", script]) as session:
+            session.process.wait(timeout=10)  # the server is gone before we send anything
+            session._stderr_thread.join(timeout=10)  # and its stderr was read
+            session.request("post", "http://stdio/", params={"cmd": "create"})
+    assert "exited with code 255" in str(exc_info.value)
+    assert "Connection refused" in str(exc_info.value)
+
+
 # a minimal stdio "server": answers each request with "ok", after writing more to stderr than a pipe buffer holds.
 STDERR_FLOOD_SERVER = r"""
 import sys
