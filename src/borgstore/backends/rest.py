@@ -189,7 +189,13 @@ class StdioSession:
         returncode = None
         try:
             if self.process.stdin is not None:
-                self.process.stdin.close()
+                try:
+                    self.process.stdin.close()
+                except OSError:
+                    # the server is gone (e.g. ssh could not connect) and closing flushed the unsent
+                    # request into the broken pipe. The fd is closed anyway; the return code and
+                    # stderr checked below tell why the server is gone.
+                    pass
             self.process.wait(timeout=self.timeout)
             returncode = self.process.returncode
         except subprocess.TimeoutExpired:
